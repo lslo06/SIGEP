@@ -638,3 +638,5 @@ grant execute on function public.crear_organizacion(text) to authenticated;
 grant execute on function public.agregar_miembro_organizacion(uuid, text, text) to authenticated;
 grant execute on function public.guardar_expediente(uuid, uuid, jsonb) to authenticated;
 grant execute on function public.eliminar_expediente(uuid, uuid) to authenticated;
+
+notify pgrst, 'reload schema';

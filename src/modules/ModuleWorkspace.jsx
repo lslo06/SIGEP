@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle, Check, ChevronRight, FilePlus2, LoaderCircle,
-  MapPinned, Pencil, Search, Trash2, Users, X, MoveUpRight, ZoomIn,
+  MapPinned, Pencil, Printer, Search, Trash2, Users, X, MoveUpRight, ZoomIn,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { modules, settingsModule } from './config'
@@ -29,6 +29,12 @@ function recordTitle(values, id, moduleKey) {
   return name || id.slice(0, 8).toUpperCase()
 }
 
+function isMissingModuleTableError(error) {
+  return error?.code === 'PGRST205'
+    || error?.code === '42P01'
+    || /could not find the table ['"]?public\.modulo_registros/i.test(error?.message || '')
+}
+
 export default function ModuleWorkspace({ moduleName, organization, user, role, onSignOut }) {
   const config = moduleName === 'Configuración y seguridad' ? settingsModule : modules[moduleName]
   if (!config) return <div className="module-error">No se encontró la configuración de este módulo.</div>
@@ -48,9 +54,20 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
   const [appliedFilters, setAppliedFilters] = useState({})
   const [mapOpen, setMapOpen] = useState(false)
   const [notice, setNotice] = useState('')
+  const [databaseUnavailable, setDatabaseUnavailable] = useState(false)
+  const [activeAction, setActiveAction] = useState(null)
+  const [actionRecordId, setActionRecordId] = useState('')
+  const [saleDate, setSaleDate] = useState('')
+  const [salePrice, setSalePrice] = useState('')
   const searchRef = useRef(null)
   const formRef = useRef(null)
   const canEdit = role !== 'viewer'
+
+  useEffect(() => {
+    if (activeAction === 'Agregar') {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [activeAction])
 
   const load = async () => {
     setLoading(true)
@@ -63,9 +80,16 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
     const { data, error } = await request
     if (error) {
       console.error(`No fue posible cargar el módulo ${moduleName}.`, error)
-      setNotice(`Error al cargar: ${error.message}. Si es la primera vez, ejecuta el schema.sql actualizado.`)
+      setRecords([])
+      if (isMissingModuleTableError(error)) {
+        setDatabaseUnavailable(true)
+        setNotice('')
+      } else {
+        setNotice(`Error al cargar: ${error.message}`)
+      }
     } else {
       setRecords(data ?? [])
+      setDatabaseUnavailable(false)
     }
     setLoading(false)
     return !error
@@ -108,6 +132,7 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
     if (!canEdit) return
     setValues({})
     setSelectedRecord(null)
+    setActiveAction('Agregar')
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
@@ -115,6 +140,7 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
     if (!canEdit) return
     setValues(record.datos || {})
     setSelectedRecord(record)
+    setActiveAction('Agregar')
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
@@ -144,7 +170,11 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
       if (await load()) setNotice('Registro guardado correctamente en Supabase.')
     } catch (error) {
       console.error(`No fue posible guardar un registro de ${moduleName}.`, error)
-      setNotice(`No se pudo guardar: ${error.message}`)
+      if (isMissingModuleTableError(error)) {
+        setDatabaseUnavailable(true)
+      } else {
+        setNotice(`No se pudo guardar: ${error.message}`)
+      }
     } finally {
       setBusy(false)
     }
@@ -159,7 +189,11 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
     const deleteError = error || (!data ? new Error('No se encontró el registro o no tienes permiso para eliminarlo.') : null)
     if (deleteError) {
       console.error(`No fue posible eliminar un registro de ${moduleName}.`, deleteError)
-      setNotice(`No se pudo eliminar: ${deleteError.message}`)
+      if (isMissingModuleTableError(deleteError)) {
+        setDatabaseUnavailable(true)
+      } else {
+        setNotice(`No se pudo eliminar: ${deleteError.message}`)
+      }
     } else {
       if (selectedRecord?.id === record.id) {
         setSelectedRecord(null)
@@ -188,8 +222,14 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
   }
 
   const action = (label) => {
-    if (config.key === 'lotes_predios' && label === 'Plano') {
-      setMapOpen(true)
+    if (config.key === 'lotes_predios' && ['Buscar lote', 'Plano', 'Vender lote', 'Imprimir'].includes(label)) {
+      setActiveAction((current) => current === label ? null : label)
+      setActionRecordId('')
+      if (label === 'Vender lote') {
+        setSaleDate('')
+        setSalePrice('')
+      }
+      setNotice('')
       return
     }
     if (config.key === 'historico_reportes' && /consultar/i.test(label)) {
@@ -210,11 +250,6 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
       exportCsv()
       return
     }
-    if (/vender lote/i.test(label)) {
-      setValues((current) => ({ ...current, 'Estado del lote': 'Vendido' }))
-      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      return
-    }
     if (/imprimir|plano|constancia|título|titulo/i.test(label)) {
       window.print()
       return
@@ -231,25 +266,80 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
     newRecord()
   }
 
+  const selectedActionRecord = records.find((record) => record.id === actionRecordId)
+
+  const continueSale = (event) => {
+    event.preventDefault()
+    if (!selectedActionRecord || !canEdit) return
+    setValues({
+      ...selectedActionRecord.datos,
+      'Estado del lote': 'Vendido',
+      'Fecha de venta': saleDate,
+      ...(salePrice ? { 'Valor total ($)': salePrice } : {}),
+    })
+    setSelectedRecord(selectedActionRecord)
+    setActiveAction('Agregar')
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const printSelectedRecord = () => {
+    if (!selectedActionRecord) return
+    window.print()
+  }
+
+  const actionRecordSelector = <label className="form-field action-record-field">
+    <span>Selecciona el lote</span>
+    <select required value={actionRecordId} onChange={(event) => setActionRecordId(event.target.value)}>
+      <option value="">Seleccionar lote...</option>
+      {records.map((record) => <option key={record.id} value={record.id}>{record.titulo}</option>)}
+    </select>
+  </label>
+
   return <section className="module-page">
     <header className="module-heading">
       <div><p className="eyebrow">{organization.nombre.toLocaleUpperCase('es')}</p><h1>{moduleName}</h1><p>{config.description}</p></div>
       <div className="module-actions">
-        {canEdit && <button className="primary-button" onClick={newRecord}><FilePlus2 size={16} /> Agregar</button>}
-        {config.actions.map((label) => <button className="module-action-button" key={label} onClick={() => action(label)}>{label}</button>)}
+        {canEdit && <button className={`module-action-button module-action-primary ${activeAction === 'Agregar' ? 'module-action-active' : ''}`} onClick={newRecord}><FilePlus2 size={20} /> Agregar</button>}
+        {config.actions.map((label) => <button className={`module-action-button ${activeAction === label ? 'module-action-active' : ''}`} key={label} onClick={() => action(label)}>{label}</button>)}
       </div>
     </header>
+    {config.key === 'lotes_predios' && activeAction && activeAction !== 'Agregar' && <section className="action-panel" aria-labelledby="action-panel-title">
+      <div className="action-panel-heading"><h2 id="action-panel-title">{activeAction}</h2><button className="action-panel-close" type="button" onClick={() => setActiveAction(null)} aria-label="Cerrar apartado"><X size={18} /></button></div>
+      {activeAction === 'Buscar lote' && <form className="action-form" onSubmit={(event) => { event.preventDefault(); setActiveAction(null); searchRef.current?.focus() }}>
+        <label className="form-field"><span>Clave catastral, manzana o lote</span><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Escribe los datos del lote que buscas" /></label>
+        <button className="primary-button" type="submit"><Search size={16} /> Buscar lote</button>
+      </form>}
+      {activeAction === 'Plano' && <div className="action-form">
+        {actionRecordSelector}
+        <button className="primary-button" type="button" disabled={!selectedActionRecord} onClick={() => { setSelectedRecord(selectedActionRecord); setValues(selectedActionRecord?.datos || {}); setMapOpen(true) }}><MapPinned size={16} /> Ver plano</button>
+      </div>}
+      {activeAction === 'Vender lote' && <form className="action-form" onSubmit={continueSale}>
+        {actionRecordSelector}
+        <label className="form-field"><span>Fecha de venta</span><input required type="date" value={saleDate} onChange={(event) => setSaleDate(event.target.value)} /></label>
+        <label className="form-field"><span>Precio de venta ($)</span><input type="number" min="0" value={salePrice} onChange={(event) => setSalePrice(event.target.value)} placeholder="Opcional" /></label>
+        <button className="primary-button" type="submit" disabled={!selectedActionRecord || !canEdit}><Check size={16} /> Continuar con la venta</button>
+      </form>}
+      {activeAction === 'Imprimir' && <div className="action-form">
+        {actionRecordSelector}
+        <button className="primary-button" type="button" disabled={!selectedActionRecord} onClick={printSelectedRecord}><Printer size={16} /> Imprimir lote</button>
+        {selectedActionRecord && <article className="print-preview">
+          <h2>{selectedActionRecord.titulo}</h2>
+          {Object.entries(selectedActionRecord.datos || {}).filter(([, value]) => value !== '' && value != null && value !== false).map(([label, value]) => <p key={label}><strong>{label}:</strong> {String(value)}</p>)}
+        </article>}
+      </div>}
+    </section>}
     <div className="module-layout">
       <section className="capture-card">
         <div className="capture-header"><div><h2>Captura principal</h2><p>Completa solo los campos de {moduleName.toLocaleLowerCase('es')}.</p></div><span className="record-count">{config.key === 'historico_reportes' ? reportRecords.length : records.length} registros</span></div>
-        <form className="module-inline-form" ref={formRef} onSubmit={save}>
+        {databaseUnavailable && <div className="schema-notice" role="status"><AlertCircle size={18} /><div><strong>Configuración pendiente de la base de datos</strong><span>Para habilitar estos apartados, ejecuta <code>supabase/schema.sql</code> en el SQL Editor de tu proyecto Supabase y vuelve a cargar.</span></div><button type="button" onClick={load} disabled={loading}>{loading ? 'Revisando…' : 'Volver a intentar'}</button></div>}
+        {activeAction === 'Agregar' && <form className="module-inline-form" ref={formRef} onSubmit={save}>
           <div className="module-fields">
             {config.fields.slice(0, config.simpleFieldCount || 6).map((field) => <ModuleField key={field.label} field={field} value={values[field.label]} onChange={(value) => setValues((current) => ({ ...current, [field.label]: value }))} />)}
           </div>
           {config.fields.length > (config.simpleFieldCount || 6) && <details className="more-fields"><summary>Mostrar más datos <span>{config.fields.length - (config.simpleFieldCount || 6)} campos adicionales</span></summary><div className="module-fields">{config.fields.slice(config.simpleFieldCount || 6).map((field) => <ModuleField key={field.label} field={field} value={values[field.label]} onChange={(value) => setValues((current) => ({ ...current, [field.label]: value }))} />)}</div></details>}
-          {canEdit && <div className="inline-form-actions">{selectedRecord && <button type="button" className="secondary-button" onClick={() => { setSelectedRecord(null); setValues({}) }}>Cancelar edición</button>}<button type="submit" className="primary-button" disabled={busy}><Check size={16} />{busy ? 'Guardando…' : selectedRecord ? 'Guardar cambios' : 'Guardar registro'}</button></div>}
+          {canEdit && <div className="inline-form-actions">{selectedRecord && <button type="button" className="secondary-button" onClick={() => { setSelectedRecord(null); setValues({}) }}>Cancelar edición</button>}<button type="submit" className="primary-button" disabled={busy || databaseUnavailable}><Check size={16} />{busy ? 'Guardando…' : selectedRecord ? 'Guardar cambios' : 'Guardar registro'}</button></div>}
           {!canEdit && <p className="readonly-message">Tu rol permite consultar la información, pero no modificarla.</p>}
-        </form>
+        </form>}
         <label className="module-search"><Search size={17} /><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Buscar en ${moduleName.toLocaleLowerCase('es')}`} /><button type="button" onClick={() => setSearch('')} aria-label="Limpiar búsqueda">×</button></label>
         {loading ? <div className="module-empty"><LoaderCircle className="spin" size={21} /> Cargando registros…</div> : reportRecords.length ? <div className="record-list">
           {reportRecords.map((record) => <article className="record-card" key={record.id}>
