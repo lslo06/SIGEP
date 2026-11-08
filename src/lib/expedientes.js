@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { positiveArea, validateDates } from './validation.js'
 
 const EXPEDIENTE_SELECT = `
   id, folio, tipo_tramite, libro, numero_titulo, fecha_titulo, estado, observacion,
@@ -58,12 +59,13 @@ export async function listExpedientes(organizacionId) {
 }
 
 export async function saveExpediente(organizacionId, expedienteId, form) {
+  validateDates(form)
   const datos = {
     propietario: form.propietario.trim(),
     fundo: form.fundo.trim(),
     manzana: form.manzana.trim(),
     lote: form.lote.trim(),
-    superficie_m2: form.superficie === '' ? null : Number(form.superficie),
+    superficie_m2: positiveArea(form.superficie),
     tipo_tramite: form.tipo,
     libro: nullable(form.libro),
     numero_titulo: nullable(form.titulo),

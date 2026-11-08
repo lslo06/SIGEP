@@ -1,0 +1,4 @@
+# El handler verifica cada JWT con Auth y después comprueba la membresía activa.
+# Permite claves de firma actuales, sin depender de la validación JWT heredada del gateway.
+[functions.crear-trabajador]
+verify_jwt = false

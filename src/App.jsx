@@ -6,6 +6,12 @@ import {
 } from 'lucide-react'
 import { deleteExpediente, listExpedientes, saveExpediente } from './lib/expedientes'
 import ModuleWorkspace from './modules/ModuleWorkspace'
+import WorkflowWorkspace from './modules/WorkflowWorkspace'
+import PaymentsWorkspace from './modules/PaymentsWorkspace'
+import { canCapture, canModule, roles } from './lib/permissions'
+import { modules } from './modules/config'
+import { routes, allowedRoute, resolveRoute } from './lib/routes.js'
+import { isPriority, localDate } from './lib/validation.js'
 
 const emptyFile = {
   tipo: 'Titulación', propietario: '', fundo: '', manzana: '', lote: '',
@@ -18,6 +24,7 @@ const emptyFile = {
 
 const navItems = [
   { label: 'Inicio', icon: House },
+  { label: 'Seguimiento de trámites', icon: ClipboardList },
   { label: 'Lotes y predios', icon: MapPinned },
   { label: 'Propietarios', icon: Users },
   { label: 'Municipios y fundos', icon: Landmark },
@@ -39,7 +46,24 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
   const [files, setFiles] = useState([])
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [activeNav, setActiveNav] = useState('Inicio')
+  const [routeHash, setRouteHash] = useState(() => window.location.hash)
+  const route = resolveRoute(routeHash, role)
+  const activeNav = route?.label
+  const setActiveNav = label => {
+    const next = routes.find(item => item.label === label)
+    if (allowedRoute(next, role)) window.location.hash = next.path
+  }
+  useEffect(() => {
+    const update = () => setRouteHash(window.location.hash)
+    window.addEventListener('hashchange', update)
+    return () => window.removeEventListener('hashchange', update)
+  }, [])
+  useEffect(() => {
+    if (route && window.location.hash !== `#${route.path}`) {
+      window.history.replaceState(null, '', `#${route.path}`)
+      setRouteHash(`#${route.path}`)
+    }
+  }, [route?.path, routeHash])
   const [activeTab, setActiveTab] = useState('Mi bandeja')
   const [search, setSearch] = useState('')
   const [dialog, setDialog] = useState(null)
@@ -47,9 +71,12 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
   const [editingId, setEditingId] = useState(null)
   const [mobileMenu, setMobileMenu] = useState(false)
   const [notice, setNotice] = useState('')
-  const canEdit = role !== 'viewer'
+  const canEdit = canCapture(role)
+  const priorityCount = files.filter(isPriority).length
+  const unassignedCount = files.filter((file) => file.areaActual === 'Recepción' && !['Vigente', 'Cancelado'].includes(file.estado)).length
 
   const refreshFiles = async () => {
+    if (role === 'finanzas') { setFiles([]); setLoadingFiles(false); return }
     setLoadingFiles(true)
     try {
       setFiles(await listExpedientes(organization.id))
@@ -61,20 +88,20 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
     }
   }
 
-  useEffect(() => { refreshFiles() }, [organization.id])
+  useEffect(() => { refreshFiles() }, [organization.id, role])
 
   const filteredFiles = useMemo(() => files.filter((file) => {
     const query = search.trim().toLocaleLowerCase('es')
     const matchesSearch = !query || [file.id, file.propietario, file.lote, file.fundo]
       .some((value) => (value || '').toLocaleLowerCase('es').includes(query))
-    const matchesTab = activeTab !== 'Prioritarios' || ['Hoy', '2 días'].includes(file.espera)
-    const matchesUnassigned = activeTab !== 'Sin asignar' || file.areaActual === 'Recepción'
+    const matchesTab = activeTab !== 'Prioritarios' || isPriority(file)
+    const matchesUnassigned = activeTab !== 'Sin asignar' || (file.areaActual === 'Recepción' && !['Vigente', 'Cancelado'].includes(file.estado))
     return matchesSearch && matchesTab && matchesUnassigned
   }), [files, search, activeTab])
 
   const openNew = () => {
     if (!canEdit) return
-    setForm({ ...emptyFile, fechaSolicitud: new Date().toISOString().slice(0, 10) })
+    setForm({ ...emptyFile, fechaSolicitud: localDate() })
     setEditingId(null)
     setDialog('form')
   }
@@ -88,6 +115,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
 
   const saveFile = async (event) => {
     event.preventDefault()
+    if (!canEdit || saving) return
     setSaving(true)
     try {
       await saveExpediente(organization.id, editingId, form)
@@ -105,7 +133,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
   }
 
   const deleteFile = async (id) => {
-    if (!canEdit) return
+    if (!['owner', 'admin'].includes(role)) return
     if (!window.confirm('¿Quieres eliminar este expediente? Esta acción no se puede deshacer.')) return
     setSaving(true)
     try {
@@ -123,6 +151,8 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
     }
   }
 
+  if (!route) return <p role="alert">Sin acceso a este apartado.</p>
+
   const openDetails = (file) => setDialog({ type: 'details', file })
 
   return (
@@ -136,41 +166,41 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
         </div>
         <div className="area-switcher">
           <span className="area-avatar">FL</span>
-          <span className="area-copy"><small>ÁREA ACTUAL</small>{organizations.length > 1 ? <select aria-label="Cambiar organización" value={organization.id} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select> : <><strong>{organization.nombre}</strong><small>Rol: {role}</small></>}</span>
+          <span className="area-copy"><small>ÁREA ACTUAL</small>{organizations.length > 1 ? <select aria-label="Cambiar organización" value={organization.id} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select> : <><strong>{organization.nombre}</strong><small>Rol: {roles[role] || role}</small></>}</span>
           <ChevronRight size={17} />
         </div>
         <nav className="side-nav" aria-label="Navegación principal">
-          {navItems.map(({ label, icon: Icon, badge }) => (
+          {navItems.filter(item => allowedRoute(routes.find(route => route.label === item.label), role)).map(({ label, icon: Icon, badge }) => (
             <button key={label} className={`nav-link ${activeNav === label ? 'nav-active' : ''}`} onClick={() => { setActiveNav(label); setMobileMenu(false) }}>
-              <Icon size={21} strokeWidth={1.8} /><span>{label}</span>{badge && <span className="nav-badge">{badge}</span>}
+              <Icon size={21} strokeWidth={1.8} /><span>{label === 'Configuración y seguridad' ? 'Administración' : label}</span>{badge && <span className="nav-badge">{badge}</span>}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="sidebar-user"><div className="user-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{role}</small></div></div>
+          <div className="sidebar-user"><div className="user-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || role}</small></div></div>
         </div>
       </aside>
 
       <main className="main-area">
         <header className="topbar">
           <button className="mobile-menu icon-button" onClick={() => setMobileMenu(true)} aria-label="Abrir menú"><Menu size={21} /></button>
-          {activeNav === 'Inicio' ? <label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar folio, propietario o lote" aria-label="Buscar folio, propietario o lote" />{search && <button onClick={() => setSearch('')} aria-label="Limpiar búsqueda"><X size={15} /></button>}</label> : <div className="current-section">{activeNav}</div>}
+          {activeNav === 'Inicio' ? <label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar folio, propietario o lote" aria-label="Buscar folio, propietario o lote" />{search && <button onClick={() => setSearch('')} aria-label="Limpiar búsqueda"><X size={15} /></button>}</label> : <div className="current-section">{activeNav === 'Configuración y seguridad' ? 'Administración' : activeNav}</div>}
           <div className="topbar-actions">
-            <button className="notification icon-button" aria-label="Notificaciones"><Bell size={20} /><i /></button>
+            {role !== 'finanzas' && <button className="notification icon-button" onClick={() => { setActiveNav('Inicio'); setActiveTab('Prioritarios') }} aria-label={`Ver ${priorityCount} expedientes prioritarios`}><Bell size={20} />{priorityCount > 0 && <i />}</button>}
             <button className="icon-button signout-button" onClick={onSignOut} aria-label="Cerrar sesión" title={`Cerrar sesión de ${user.email}`}><LogOut size={18} /></button>
-            <div className="top-user"><div className="user-avatar small-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{role}</small></div><ChevronDown size={15} /></div>
+            <div className="top-user"><div className="user-avatar small-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || role}</small></div><ChevronDown size={15} /></div>
           </div>
         </header>
 
-        {activeNav !== 'Inicio' ? <div className="content"><ModuleWorkspace moduleName={activeNav} organization={organization} user={user} role={role} onSignOut={onSignOut} /></div> : <div className="content">
+        {activeNav !== 'Inicio' ? <div className="content">{activeNav === 'Pagos y servicios' ? <PaymentsWorkspace organization={organization} role={role} /> : activeNav === 'Seguimiento de trámites' ? <WorkflowWorkspace organization={organization} user={user} role={role} files={files} refreshFiles={refreshFiles} /> : canModule(role, modules[activeNav]?.key || 'configuracion_seguridad') ? <ModuleWorkspace moduleName={activeNav} organization={organization} user={user} role={role} onSignOut={onSignOut} /> : <p>Sin acceso a este apartado.</p>}</div> : <div className="content">
           <section className="welcome-row">
             <div><div className="eyebrow date-label">{new Intl.DateTimeFormat('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()).toLocaleUpperCase('es-MX')}</div><h1>Buenos días, {user.user_metadata?.nombre || user.email?.split('@')[0]}</h1><p>Tienes <strong className="orange-text">{files.filter((file) => ['Hoy', '1 día'].includes(file.espera)).length} tareas pendientes</strong> en {organization.nombre}.</p></div>
             {canEdit && <button className="primary-button" onClick={openNew}><Plus size={17} /> Nuevo trámite</button>}
           </section>
 
           <section className="priority-banner">
-            <div className="priority-copy"><div className="eyebrow aqua">PRIORIDAD DEL DÍA</div><h2>3 expedientes requieren atención hoy</h2><p>Uno está próximo a vencer y dos esperan canalización.</p></div>
-            <div className="priority-counts"><div className="priority-count"><span className="dot red-dot" /><div><strong>1</strong><small>Por vencer</small></div></div><div className="priority-count"><span className="dot gold-dot" /><div><strong>2</strong><small>Sin asignar</small></div></div><button onClick={() => { setActiveTab('Prioritarios'); setActiveNav('Inicio') }}>Revisar ahora <ChevronRight size={16} /></button></div>
+            <div className="priority-copy"><div className="eyebrow aqua">TU TERRITORIO, EN ORDEN</div><h2>{loadingFiles ? 'Preparando tu resumen de trabajo' : priorityCount ? `${priorityCount} expedientes requieren atención` : 'Todo listo para seguir avanzando'}</h2><p>Da seguimiento a cada trámite, desde la recepción hasta la entrega.</p></div>
+            <div className="priority-counts"><div className="priority-count"><span className="dot red-dot" /><div><strong>{priorityCount}</strong><small>Prioritarios</small></div></div><div className="priority-count"><span className="dot gold-dot" /><div><strong>{unassignedCount}</strong><small>En recepción</small></div></div><button onClick={() => { setActiveTab('Prioritarios'); setActiveNav('Inicio') }}>Revisar bandeja <ChevronRight size={16} /></button></div>
           </section>
 
           <section className="stats-grid">
@@ -262,7 +292,7 @@ function DetailsDialog({ file, canEdit, onClose, onEdit, onDelete }) {
       {group('Costos y saldos', [['Costo del terreno', formatMoney(file.costoTerreno)], ['Parcialidades pagadas', formatMoney(file.parcialidades)], ['Saldo pendiente', formatMoney(file.saldoPendiente)]])}
       {group('Oficios y seguimiento', [['Número de oficio', file.oficio], ['Seguimiento de firmas', file.seguimientoFirmas], ['Área actual', file.areaActual], ['Siguiente acción', file.siguienteAccion], ['En espera', file.espera]])}
     </div>
-    <footer className="dialog-footer details-footer">{canEdit && <button className="delete-button" onClick={onDelete}><Trash2 size={16} /> Eliminar</button>}<div><button className="secondary-button" onClick={onClose}>Cerrar</button>{canEdit && <button className="primary-button" onClick={onEdit}><Pencil size={15} /> Editar expediente</button>}</div></footer>
+    <footer className="dialog-footer details-footer"><div><button className="secondary-button" onClick={onClose}>Cerrar</button>{canEdit && <button className="primary-button" onClick={onEdit}><Pencil size={15} /> Editar expediente</button>}</div></footer>
   </section></div>
 }
 

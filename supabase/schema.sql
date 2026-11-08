@@ -309,7 +309,7 @@ declare
   v_expediente_id uuid;
   v_fundo_nombre text := nullif(trim(p_datos->>'fundo'), '');
   v_propietario_nombre text := nullif(trim(p_datos->>'propietario'), '');
-  v_manzana text := coalesce(p_datos->>'manzana', '');
+  v_manzana text := trim(coalesce(p_datos->>'manzana', ''));
   v_lote text := nullif(trim(p_datos->>'lote'), '');
 begin
   if not public.puede_editar_organizacion(p_organizacion_id) then
@@ -319,6 +319,13 @@ begin
   if v_fundo_nombre is null or v_propietario_nombre is null or v_lote is null then
     raise exception 'El propietario, el fundo y el lote son obligatorios.';
   end if;
+
+  if nullif(p_datos->>'fecha_entrega', '')::date < nullif(p_datos->>'fecha_solicitud', '')::date then
+    raise exception 'La fecha de entrega no puede ser anterior a la solicitud.';
+  end if;
+
+  -- Serializa la resolución de propietarios y predios dentro de la organización.
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_organizacion_id::text, 0));
 
   select f.id into v_fundo_id
   from public.fundos f
@@ -375,6 +382,23 @@ begin
     )
     returning id into v_predio_id;
   else
+    -- Un predio puede tener varios trámites. No modificar sus datos desde uno
+    -- de ellos si eso cambia silenciosamente la información de los demás.
+    if exists (
+      select 1 from public.expedientes e
+      where e.predio_id = v_predio_id
+        and (p_expediente_id is null or e.id <> p_expediente_id)
+    ) and exists (
+      select 1 from public.predios p where p.id = v_predio_id
+        and (p.propietario_id is distinct from v_propietario_id
+          or p.fundo_id is distinct from v_fundo_id
+          or p.manzana is distinct from v_manzana
+          or p.lote is distinct from v_lote
+          or p.superficie_m2 is distinct from nullif(p_datos->>'superficie_m2', '')::numeric)
+    ) then
+      raise exception 'Este predio está vinculado a otros expedientes. Sus datos deben coincidir para evitar modificar otros trámites.';
+    end if;
+
     update public.predios
     set propietario_id = v_propietario_id,
         fundo_id = v_fundo_id,
