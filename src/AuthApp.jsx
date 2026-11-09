@@ -14,19 +14,24 @@ export default function AuthApp() {
     let alive = true
     // INITIAL_SESSION restores the session; a separate getSession request could
     // overwrite a newer SIGNED_OUT event with a stale session.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (!alive) return
-      setSession(nextSession)
-      setLoading(false)
-    }).catch(() => {
+    let subscription
+    try {
+      const result = supabase.auth.onAuthStateChange((_event, nextSession) => {
+        if (!alive) return
+        setSession(nextSession)
+        setLoading(false)
+      })
+      subscription = result.data.subscription
+    } catch (error) {
+      console.error('No fue posible iniciar la autenticación de Supabase.', error)
       if (!alive) return
       setSession(null)
       setLoading(false)
-    })
+    }
 
     return () => {
       alive = false
-      subscription.unsubscribe()
+      subscription?.unsubscribe()
     }
   }, [])
 

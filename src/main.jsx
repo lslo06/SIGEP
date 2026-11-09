@@ -4,6 +4,7 @@ import AuthApp from './AuthApp.jsx'
 import './index.css'
 import './design.css'
 import './modules/record-editor.css'
+import './visual-refresh.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

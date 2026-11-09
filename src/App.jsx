@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bell, ChevronDown, ChevronRight, CircleHelp, ClipboardList, FileText, Folder,
   House, Map, Menu, Plus, Search, Settings, Users, X, Landmark, Wallet,
@@ -71,9 +71,21 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
   const [editingId, setEditingId] = useState(null)
   const [mobileMenu, setMobileMenu] = useState(false)
   const [notice, setNotice] = useState('')
+  const inboxRef = useRef(null)
   const canEdit = canCapture(role)
+  const organizationInitials = organization.nombre
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(word => word[0])
+    .join('')
+    .toLocaleUpperCase('es')
   const priorityCount = files.filter(isPriority).length
   const unassignedCount = files.filter((file) => file.areaActual === 'Recepción' && !['Vigente', 'Cancelado'].includes(file.estado)).length
+  const reviewInbox = () => {
+    setActiveTab('Prioritarios')
+    inboxRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   const refreshFiles = async () => {
     if (role === 'finanzas') { setFiles([]); setLoadingFiles(false); return }
@@ -165,9 +177,8 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
           <button className="mobile-close icon-button" onClick={() => setMobileMenu(false)} aria-label="Cerrar menú"><X size={20} /></button>
         </div>
         <div className="area-switcher">
-          <span className="area-avatar">FL</span>
-          <span className="area-copy"><small>ÁREA ACTUAL</small>{organizations.length > 1 ? <select aria-label="Cambiar organización" value={organization.id} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select> : <><strong>{organization.nombre}</strong><small>Rol: {roles[role] || role}</small></>}</span>
-          <ChevronRight size={17} />
+          <span className="area-avatar">{organizationInitials}</span>
+          <span className="area-copy"><small>{organizations.length > 1 ? 'CAMBIAR ORGANIZACIÓN' : 'ORGANIZACIÓN ACTUAL'}</small>{organizations.length > 1 ? <select aria-label="Cambiar organización" value={organization.id} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select> : <><strong>{organization.nombre}</strong><small>Rol: {roles[role] || role}</small></>}</span>
         </div>
         <nav className="side-nav" aria-label="Navegación principal">
           {navItems.filter(item => allowedRoute(routes.find(route => route.label === item.label), role)).map(({ label, icon: Icon, badge }) => (
@@ -200,7 +211,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
 
           <section className="priority-banner">
             <div className="priority-copy"><div className="eyebrow aqua">TU TERRITORIO, EN ORDEN</div><h2>{loadingFiles ? 'Preparando tu resumen de trabajo' : priorityCount ? `${priorityCount} expedientes requieren atención` : 'Todo listo para seguir avanzando'}</h2><p>Da seguimiento a cada trámite, desde la recepción hasta la entrega.</p></div>
-            <div className="priority-counts"><div className="priority-count"><span className="dot red-dot" /><div><strong>{priorityCount}</strong><small>Prioritarios</small></div></div><div className="priority-count"><span className="dot gold-dot" /><div><strong>{unassignedCount}</strong><small>En recepción</small></div></div><button onClick={() => { setActiveTab('Prioritarios'); setActiveNav('Inicio') }}>Revisar bandeja <ChevronRight size={16} /></button></div>
+            <div className="priority-counts"><div className="priority-count"><span className="dot red-dot" /><div><strong>{priorityCount}</strong><small>Prioritarios</small></div></div><div className="priority-count"><span className="dot gold-dot" /><div><strong>{unassignedCount}</strong><small>En recepción</small></div></div><button onClick={reviewInbox}>Revisar bandeja <ChevronRight size={16} /></button></div>
           </section>
 
           <section className="stats-grid">
@@ -209,7 +220,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
             <StatCard icon={FileText} tone="green" label="LISTOS PARA ENTREGA" value={String(files.filter((file) => file.estado === 'Listo para entrega').length)} caption="Pendientes de entrega" />
           </section>
 
-          <section className="work-panel">
+          <section className="work-panel" ref={inboxRef}>
             <div className="panel-heading">
               <div><h2>Bandeja de trabajo</h2><p>Acciones que corresponden a tu área.</p></div>
               <div className="tabs" role="tablist" aria-label="Filtrar expedientes">{['Mi bandeja', 'Prioritarios', 'Sin asignar'].map((tab) => <button key={tab} className={activeTab === tab ? 'tab-active' : ''} onClick={() => setActiveTab(tab)}>{tab}</button>)}</div>
