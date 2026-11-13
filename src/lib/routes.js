@@ -3,6 +3,7 @@ import { canModule, roles } from './permissions.js'
 export const routes = [
   { path: '/inicio', label: 'Inicio', key: 'inicio' },
   { path: '/tramites', label: 'Seguimiento de trámites', key: 'tramites' },
+  { path: '/campo', label: 'Medición y topografía', key: 'campo' },
   { path: '/predios', label: 'Lotes y predios', key: 'lotes_predios' },
   { path: '/propietarios', label: 'Propietarios', key: 'propietarios' },
   { path: '/fundos', label: 'Municipios y fundos', key: 'municipios_fundos' },
@@ -13,10 +14,15 @@ export const routes = [
 ]
 
 export function allowedRoute(route, role) {
-  return Boolean(route && roles[role] && canModule(role, route.key))
+  return Boolean(route && route.key !== 'campo' && roles[role] && canModule(role, route.key))
+}
+
+export function findRoute(hash) {
+  const path = hash.replace(/^#/, '') || '/inicio'
+  return routes.find(item => item.path === (path === '/mapa' ? '/predios' : path))
 }
 
 export function resolveRoute(hash, role) {
-  const route = routes.find(item => item.path === hash.replace(/^#/, ''))
+  const route = findRoute(hash)
   return allowedRoute(route, role) ? route : routes.find(item => allowedRoute(item, role))
 }

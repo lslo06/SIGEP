@@ -1,12 +1,23 @@
 /* Estilo visual nuevo y aislado. Se revierte quitando su importación en main.jsx. */
 :root {
-  --surface: #ffffff;
-  --canvas: #f3f6f8;
+  --cosan-frost: #f0f3fa;
+  --cosan-mist: #d5deef;
+  --cosan-sky: #b1c9ef;
+  --cosan-haze: #8aaee0;
+  --cosan-blue: #638ecb;
+  --cosan-navy: #395886;
+  --surface: rgba(240, 243, 250, .76);
+  --glass-border: rgba(255, 255, 255, .76);
+  --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 14px 36px rgba(57, 88, 134, .12);
+  --glass-background: radial-gradient(ellipse at 92% 8%, var(--cosan-sky) 0, transparent 48%),
+    radial-gradient(ellipse at 24% 90%, var(--cosan-mist) 0, transparent 46%),
+    linear-gradient(145deg, var(--cosan-frost), var(--cosan-mist));
+  --canvas: var(--cosan-frost);
   --ink: #18324a;
   --muted: #6f8293;
   --line: #e2e9ee;
-  --brand: #173b59;
-  --accent: #178477;
+  --brand: var(--cosan-navy);
+  --accent: var(--cosan-navy);
   --card-shadow: 0 8px 26px rgba(27, 52, 72, .055);
 }
 
@@ -118,4 +129,171 @@ button:focus-visible, a:focus-visible { outline-color: #278f80; }
   .content { padding-top: 25px; }
   .auth-screen { padding: 18px 14px; }
   .auth-card { padding: 26px 22px; }
+}
+
+.brand-subtitle {
+  letter-spacing: 0.13em;
+  font-weight: 700;
+}
+
+.auth-brand small {
+  letter-spacing: 0.13em;
+}
+
+.auth-screen > footer {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: #526d80;
+  font-weight: 600;
+}
+
+
+/* COSAN · superficies translúcidas sobre la paleta institucional. */
+body,
+body .auth-screen,
+body .record-editor {
+  background: var(--glass-background);
+}
+
+body .sidebar {
+  background: linear-gradient(158deg, rgba(57, 88, 134, .97), rgba(30, 51, 82, .97));
+  border-right: 1px solid rgba(213, 222, 239, .34);
+  backdrop-filter: blur(18px) saturate(130%);
+  box-shadow: 10px 0 34px rgba(34, 60, 96, .14);
+}
+
+body .sidebar .brand-mark,
+body .sidebar .area-switcher {
+  background: rgba(177, 201, 239, .14);
+  border-color: rgba(213, 222, 239, .28);
+}
+
+body .sidebar .nav-active {
+  background: rgba(138, 174, 224, .24);
+  box-shadow: inset 3px 0 var(--cosan-blue);
+}
+
+body .sidebar :is(.nav-active svg, .brand-subtitle) {
+  color: var(--cosan-sky);
+}
+
+body :is(.auth-card, .topbar, .stat-card, .work-panel, .lower-card, .action-panel,
+  .capture-card, .related-card, .users-card, .sgfl-card, .editor-index, .editor-form,
+  .form-dialog, .details-dialog, .map-preview, .map-workspace .predio-search,
+  .map-workspace .map-shell, .sigep-predio-create .create-dialog) {
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(17px) saturate(138%);
+}
+
+body :is(.form-dialog, .details-dialog, .map-preview, .sigep-predio-create .create-dialog) {
+  background: rgba(240, 243, 250, .93);
+}
+
+body :is(.modal-backdrop, .map-modal-backdrop, .sigep-predio-create .create-dialog-backdrop) {
+  background: rgba(29, 48, 79, .38);
+  backdrop-filter: blur(8px);
+}
+
+body :is(.priority-banner, .auth-story) {
+  background: linear-gradient(150deg, rgba(57, 88, 134, .94), rgba(31, 52, 86, .97));
+  border: 1px solid rgba(213, 222, 239, .38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 20px 42px rgba(57, 88, 134, .23);
+  backdrop-filter: blur(16px);
+}
+
+body :is(.auth-story-label, .auth-story h2 em, .territory-art, .priority-banner .aqua) {
+  color: var(--cosan-sky);
+}
+
+body .territory-art span {
+  border-color: rgba(213, 222, 239, .64);
+  background: rgba(138, 174, 224, .15);
+}
+
+body .auth-story::after {
+  border-color: rgba(177, 201, 239, .24);
+  box-shadow: 0 0 0 34px rgba(177, 201, 239, .08), 0 0 0 70px rgba(177, 201, 239, .05);
+}
+
+body :is(.primary-button, .module-action-primary, .map-workspace .predio-search-submit,
+  .sigep-predio-create .primary-action, .map-workspace .parcel-map-toolbar button[aria-pressed="true"]) {
+  color: white;
+  background: linear-gradient(135deg, #486c9e, var(--cosan-navy));
+  border: 1px solid rgba(213, 222, 239, .55);
+  box-shadow: 0 7px 18px rgba(57, 88, 134, .23);
+}
+
+body :is(.primary-button, .module-action-primary, .map-workspace .predio-search-submit,
+  .sigep-predio-create .primary-action):hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--cosan-navy), #2c466e);
+}
+
+body :is(.secondary-button, .module-action-button, .topbar .icon-button,
+  .map-workspace .center-map, .map-workspace .parcel-map-toolbar button[aria-pressed="false"],
+  .map-workspace .parcel-map-toolbar small, .map-workspace .coordinates) {
+  color: #29466f;
+  background: rgba(240, 243, 250, .88);
+  border-color: rgba(255, 255, 255, .88);
+  backdrop-filter: blur(10px);
+}
+
+body :is(.secondary-button, .module-action-button):hover:not(:disabled),
+body .map-workspace .sigep-map-controls button[aria-pressed="true"],
+body .map-workspace .predio-search-result.selected {
+  color: #244267;
+  background: var(--cosan-mist);
+  border-color: var(--cosan-haze);
+}
+
+body :is(.auth-brand .brand-mark, .editor-title-icon, .file-icon, .section-icon,
+  .detail-file-icon, .stat-icon.blue, .stat-icon.green) {
+  color: var(--cosan-navy);
+  background: var(--cosan-mist);
+}
+
+body :is(.search-box, .table-head, .module-inline-form, .editor-guidance) {
+  background: rgba(213, 222, 239, .52);
+  border-color: rgba(138, 174, 224, .32);
+}
+
+body :is(.form-field input, .form-field select, .form-field textarea, .auth-field input,
+  .users-form input, .users-form select, .sgfl-fields input, .sgfl-fields select,
+  .sgfl-fields textarea, .map-workspace .predio-search input, .map-workspace .predio-search select) {
+  color: #253c5b;
+  background: rgba(250, 252, 255, .78);
+  border-color: #b4c6e0;
+}
+
+body :is(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--cosan-navy);
+  outline-offset: 2px;
+}
+
+body .sidebar :is(button, a, select):focus-visible {
+  outline-color: var(--cosan-sky);
+}
+
+body .file-row:hover {
+  background: rgba(177, 201, 239, .21);
+}
+
+body .map-workspace .leaflet-map {
+  background: var(--cosan-mist);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root { --surface: #f0f3fa; }
+  body :is(.sidebar, .topbar, .auth-card, .auth-story, .stat-card, .work-panel, .lower-card,
+    .action-panel, .capture-card, .related-card, .users-card, .sgfl-card, .editor-index,
+    .editor-form, .form-dialog, .details-dialog, .map-preview, .map-workspace .predio-search,
+    .map-workspace .map-shell, .sigep-predio-create .create-dialog) {
+    backdrop-filter: none;
+  }
+}
+
+@media print {
+  body, body .record-editor { background: white; }
+  body :is(.sgfl-card, .editor-form) { backdrop-filter: none; box-shadow: none; }
 }

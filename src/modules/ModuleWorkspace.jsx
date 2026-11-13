@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle, Check, ChevronRight, FilePlus2, LoaderCircle,
-  MapPinned, Pencil, Printer, Search, Trash2, Users, X, MoveUpRight, ZoomIn,
+  MapPinned, Pencil, Printer, Search, Trash2, Users, X,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { modules, settingsModule } from './config'
 import RecordEditor from './RecordEditor'
 import { canModule } from '../lib/permissions'
 import UsersWorkspace from './UsersWorkspace'
+import LocalAdministration from './LocalAdministration'
+
+const MapWorkspace = lazy(() => import('./MapWorkspace'))
 
 const titleFields = {
   lotes_predios: ['Clave catastral', 'Lote'],
@@ -38,16 +41,17 @@ function isMissingModuleTableError(error) {
     || /could not find the table ['"]?public\.modulo_registros/i.test(error?.message || '')
 }
 
-export default function ModuleWorkspace({ moduleName, organization, user, role, onSignOut }) {
+export default function ModuleWorkspace({ moduleName, organization, user, role, onSignOut, local = false }) {
   const config = moduleName === 'Configuración y seguridad' ? settingsModule : modules[moduleName]
   if (!config) return <div className="module-error">No se encontró la configuración de este módulo.</div>
-  if (moduleName === 'Configuración y seguridad') {
+  if (!local && moduleName === 'Configuración y seguridad') {
     return <SecurityWorkspace config={config} organization={organization} user={user} role={role} onSignOut={onSignOut} />
   }
-  return <RecordWorkspace key={`${organization.id}-${config.key}`} config={config} moduleName={moduleName} organization={organization} user={user} role={role} />
+  if (local && moduleName === 'Configuración y seguridad') return <LocalAdministration />
+  return <RecordWorkspace key={`${organization.id}-${config.key}`} config={config} moduleName={moduleName} organization={organization} user={user} role={role} local={local} />
 }
 
-function RecordWorkspace({ config, moduleName, organization, user, role }) {
+function RecordWorkspace({ config, moduleName, organization, user, role, local }) {
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -68,7 +72,7 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
   const [editorTarget, setEditorTarget] = useState(null)
   const [editorError, setEditorError] = useState('')
   const initialValuesRef = useRef('{}')
-  const canEdit = canModule(role, config.key, true)
+  const canEdit = !local && canModule(role, config.key, true)
 
   const openEditor = (initialValues = {}) => {
     if (editorWindowRef.current && !editorWindowRef.current.closed) {
@@ -146,6 +150,16 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
     setLoading(true)
     setLoadError('')
     try {
+      if (local) {
+        const response = await fetch(`/api/sigep/modulos/${config.key}`)
+        const data = await response.json()
+        if (!response.ok || !Array.isArray(data.registros)) {
+          throw new Error(response.status === 404 ? 'Actualiza la API de SIGEP en el servidor.' : data.error || 'No fue posible consultar el módulo.')
+        }
+        setRecords(data.registros)
+        setDatabaseUnavailable(false)
+        return true
+      }
     let request = supabase
       .from('modulo_registros')
       .select('id, titulo, datos, creado_en, actualizado_en')
@@ -169,14 +183,14 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
     }
     return !error
     } catch (error) {
-      setLoadError('No se pudo conectar con la base de datos. Comprueba tu conexión y vuelve a intentar.')
+      setLoadError(local && !(error instanceof SyntaxError) ? error.message : 'No se pudo conectar con la base de datos. Comprueba tu conexión y vuelve a intentar.')
       return false
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [organization.id, config.key])
+  useEffect(() => { load() }, [organization.id, config.key, local])
 
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('es')
@@ -289,7 +303,7 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
   }
 
   const exportCsv = () => {
-    const columns = config.key === 'historico_reportes'
+    const columns = local ? [...new Set(reportRecords.flatMap(record => Object.keys(record.datos || {})))] : config.key === 'historico_reportes'
       ? [...new Set(reportRecords.flatMap((record) => Object.keys(record.datos || {})))]
       : config.fields.map((field) => field.label)
     const rows = reportRecords.map((record) => columns.map((field) => record.datos?.[field] ?? ''))
@@ -386,10 +400,10 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
 
   return <section className="module-page">
     <header className="module-heading">
-      <div><p className="eyebrow">{organization.nombre.toLocaleUpperCase('es')}</p><h1>{moduleName}</h1><p>{config.description}</p></div>
+      <div><p className="eyebrow">{organization.nombre.toLocaleUpperCase('es')}</p><h1>{moduleName}</h1><p>{local && config.key === 'configuracion_seguridad' ? 'Organizaciones y membresías. La gestión de cuentas requiere autenticación local.' : config.description}</p></div>
       <div className="module-actions">
         {canEdit && <button disabled={loading || databaseUnavailable || Boolean(loadError)} className={`module-action-button module-action-primary ${activeAction === 'Agregar' ? 'module-action-active' : ''}`} onClick={newRecord}><FilePlus2 size={20} /> Agregar</button>}
-        {config.actions.map((label) => <button className={`module-action-button ${activeAction === label ? 'module-action-active' : ''}`} key={label} onClick={() => action(label)}>{label}</button>)}
+        {(local ? config.actions.filter(label => /buscar|consulta|reporte|exportar|imprimir/i.test(label)) : config.actions).map((label) => <button className={`module-action-button ${activeAction === label ? 'module-action-active' : ''}`} key={label} onClick={() => action(label)}>{label}</button>)}
       </div>
     </header>
     {config.key === 'lotes_predios' && activeAction && activeAction !== 'Agregar' && <section className="action-panel" aria-labelledby="action-panel-title">
@@ -419,8 +433,8 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
     </section>}
     <div className="module-layout">
       <section className="capture-card">
-        <div className="capture-header"><div><h2>Captura principal</h2><p>Completa solo los campos de {moduleName.toLocaleLowerCase('es')}.</p></div><span className="record-count">{config.key === 'historico_reportes' ? reportRecords.length : records.length} registros</span></div>
-        {databaseUnavailable && <div className="schema-notice" role="alert"><AlertCircle size={18} /><div><strong>Este apartado no está disponible por el momento</strong><span>Intenta nuevamente en unos minutos. Si el problema continúa, comunícate con soporte.</span></div><button type="button" onClick={load} disabled={loading}>{loading ? 'Revisando…' : 'Volver a intentar'}</button></div>}
+        <div className="capture-header"><div><h2>{local ? 'Registros' : 'Captura principal'}</h2>{!local && <p>Completa solo los campos de {moduleName.toLocaleLowerCase('es')}.</p>}</div><span className="record-count">{config.key === 'historico_reportes' ? reportRecords.length : records.length} registros</span></div>
+        {databaseUnavailable && <div className="schema-notice" role="alert"><AlertCircle size={18} /><div><strong>Este apartado no está disponible por el momento</strong><span>{local ? 'Este apartado todavía no está conectado a los registros de SIGEP.' : 'Intenta nuevamente en unos minutos. Si el problema continúa, comunícate con soporte.'}</span></div><button type="button" onClick={load} disabled={loading}>{loading ? 'Revisando…' : 'Volver a intentar'}</button></div>}
         <label className="module-search"><Search size={17} /><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Buscar en ${moduleName.toLocaleLowerCase('es')}`} /><button type="button" onClick={() => setSearch('')} aria-label="Limpiar búsqueda">×</button></label>
         {loading ? <div className="module-empty"><LoaderCircle className="spin" size={21} /> Cargando registros…</div> : databaseUnavailable ? null : loadError ? <div className="module-error-state" role="alert"><AlertCircle size={22} /><strong>No se pudieron cargar los registros</strong><span>{loadError}</span><button type="button" className="secondary-button" onClick={load}>Volver a intentar</button></div> : reportRecords.length ? <div className="record-list">
           {reportRecords.map((record) => <article className="record-card" key={record.id}>
@@ -433,42 +447,31 @@ function RecordWorkspace({ config, moduleName, organization, user, role }) {
       <aside className="related-card">
         <h2>Información de este apartado</h2>
         <div className="related-table">
-          {config.related.map((row, index) => <div className={index === 0 ? 'related-row related-head' : 'related-row'} key={`${row[0]}-${index}`}><span>{row[0]}</span><span>{row[1]}</span>{row[2] && <span>{row[2]}</span>}</div>)}
+          {config.related?.map((row, index) => <div className={index === 0 ? 'related-row related-head' : 'related-row'} key={`${row[0]}-${index}`}><span>{row[0]}</span><span>{row[1]}</span>{row[2] && <span>{row[2]}</span>}</div>)}
         </div>
         <p className="related-note">Al agregar o editar, encontrarás todos los campos organizados en secciones dentro del formulario de captura.</p>
       </aside>
     </div>
-    {mapOpen && <MapPreview values={selectedRecord?.datos || values} onClose={() => setMapOpen(false)} />}
+    {mapOpen && <MapPreview values={selectedRecord?.datos || values} canViewMap={canModule(role, 'mapa')} onClose={() => setMapOpen(false)} />}
     {notice && <div className={`module-notice ${notice.startsWith('No se pudo') || notice.startsWith('Error') ? 'notice-error' : ''}`}><AlertCircle size={16} />{notice}<button onClick={() => setNotice('')}>Cerrar</button></div>}
-    {busy && <div className="saving-overlay"><LoaderCircle className="spin" size={17} />Guardando en Supabase...</div>}
+    {busy && <div className="saving-overlay"><LoaderCircle className="spin" size={17} />Guardando registro…</div>}
   </section>
 }
 
-function MapPreview({ values, onClose }) {
-  const title = values['Clave catastral'] || values['Lote'] || 'Lote de ejemplo'
-  const manzana = values['Manzana'] || 'A'
-  return <div className="map-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+function MapPreview({ values, canViewMap, onClose }) {
+  const key = String(values['Clave catastral'] || '').trim()
+  return <div className="map-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && onClose()}>
     <section className="map-preview" role="dialog" aria-modal="true" aria-labelledby="map-title">
-      <header className="map-header"><div><span className="map-title-icon"><MapPinned size={19} /></span><div><h2 id="map-title">Plano del terreno</h2><p>{title} · Manzana {manzana}</p></div></div><button className="icon-button" onClick={onClose} aria-label="Cerrar mapa"><X size={19} /></button></header>
-      <div className="map-canvas">
-        <div className="map-preview-label"><span className="preview-dot" /> Vista previa ilustrativa</div>
-        <div className="map-north"><MoveUpRight size={18} /><strong>N</strong></div>
-        <div className="map-road map-road-top"><span>CALLE PRINCIPAL</span></div>
-        <div className="map-road map-road-left"><span>AV. DEL FUNDO</span></div>
-        <div className="map-block block-ne"><span>MANZANA B</span></div>
-        <div className="map-block block-sw"><span>MANZANA C</span></div>
-        <div className="map-block block-se"><span>MANZANA D</span></div>
-        <div className="parcel parcel-main">
-          <span className="parcel-number">{values['Lote'] || 'Lote'}</span>
-          <strong>{title}</strong>
-          <span className="parcel-size">{values['Superficie real (m²)'] ? `${values['Superficie real (m²)']} m²` : 'Superficie pendiente'}</span>
+      <header className="map-header">
+        <div>
+          <span className="map-title-icon"><MapPinned size={19} /></span>
+          <div><h2 id="map-title">Plano del terreno</h2><p>{key || 'Consulta por clave catastral'}</p></div>
         </div>
-        <div className="map-street-label">CALLE DEL TERRENO</div>
-        <div className="map-legend"><span><i className="legend-parcel" /> Lote seleccionado</span><span><i className="legend-block" /> Otros terrenos</span></div>
-        <span className="map-scale">0 ───────── 20 m</span>
-      </div>
-      <div className="map-status"><AlertCircle size={16} /><div><strong>Mapa de demostración</strong><span>Este plano es ilustrativo. La conexión con QGIS y la ubicación catastral todavía no están habilitadas.</span></div></div>
-      <footer className="map-footer"><span><ZoomIn size={15} /> Vista previa sin interacción</span><button className="secondary-button" onClick={onClose}>Cerrar</button></footer>
+        <button className="icon-button" type="button" onClick={onClose} aria-label="Cerrar mapa"><X size={19} /></button>
+      </header>
+      {canViewMap
+        ? <Suspense fallback={<p role="status">Cargando mapa…</p>}><MapWorkspace initialKey={key} parcelOnly /></Suspense>
+        : <div className="map-status"><AlertCircle size={16} /> Tu perfil no tiene acceso a la consulta cartográfica.</div>}
     </section>
   </div>
 }

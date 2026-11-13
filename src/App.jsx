@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bell, ChevronDown, ChevronRight, CircleHelp, ClipboardList, FileText, Folder,
   House, Map, Menu, Plus, Search, Settings, Users, X, Landmark, Wallet,
@@ -10,8 +10,13 @@ import WorkflowWorkspace from './modules/WorkflowWorkspace'
 import PaymentsWorkspace from './modules/PaymentsWorkspace'
 import { canCapture, canModule, roles } from './lib/permissions'
 import { modules } from './modules/config'
-import { routes, allowedRoute, resolveRoute } from './lib/routes.js'
+import { routes, allowedRoute, findRoute, resolveRoute } from './lib/routes.js'
 import { isPriority, localDate } from './lib/validation.js'
+import { firmName, productName } from './lib/brand.js'
+
+const MapWorkspace = lazy(() => import('./modules/MapWorkspace'))
+const FieldWorkspace = lazy(() => import('./modules/FieldWorkspace'))
+const ExpedienteSearch = lazy(() => import('./components/map/ExpedienteSearch'))
 
 const emptyFile = {
   tipo: 'Titulación', propietario: '', fundo: '', manzana: '', lote: '',
@@ -25,6 +30,7 @@ const emptyFile = {
 const navItems = [
   { label: 'Inicio', icon: House },
   { label: 'Seguimiento de trámites', icon: ClipboardList },
+  { label: 'Medición y topografía', icon: MapPinned },
   { label: 'Lotes y predios', icon: MapPinned },
   { label: 'Propietarios', icon: Users },
   { label: 'Municipios y fundos', icon: Landmark },
@@ -42,16 +48,21 @@ function formatMoney(value) {
     : '—'
 }
 
-function App({ user, organization, organizations, role, onSignOut, onOrganizationChange }) {
+function App({ user, organization, organizations, role, onSignOut, onOrganizationChange, local = false, permissions }) {
   const [files, setFiles] = useState([])
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [saving, setSaving] = useState(false)
   const [routeHash, setRouteHash] = useState(() => window.location.hash)
-  const route = resolveRoute(routeHash, role)
+  const hasModule = key => key === 'campo' ? permissions?.campo : permissions?.modulos.includes('*') || permissions?.modulos.includes(key)
+  const canOpenRoute = item => Boolean(item && (local ? hasModule(item.key) : allowedRoute(item, role)))
+  const requested = findRoute(routeHash)
+  const route = local
+    ? (canOpenRoute(requested) ? requested : routes.find(canOpenRoute))
+    : resolveRoute(routeHash, role)
   const activeNav = route?.label
   const setActiveNav = label => {
     const next = routes.find(item => item.label === label)
-    if (allowedRoute(next, role)) window.location.hash = next.path
+    if (canOpenRoute(next)) window.location.hash = next.path
   }
   useEffect(() => {
     const update = () => setRouteHash(window.location.hash)
@@ -63,7 +74,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
       window.history.replaceState(null, '', `#${route.path}`)
       setRouteHash(`#${route.path}`)
     }
-  }, [route?.path, routeHash])
+  }, [route?.path, routeHash, local])
   const [activeTab, setActiveTab] = useState('Mi bandeja')
   const [search, setSearch] = useState('')
   const [dialog, setDialog] = useState(null)
@@ -88,19 +99,38 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
   }
 
   const refreshFiles = async () => {
-    if (role === 'finanzas') { setFiles([]); setLoadingFiles(false); return }
+    if (local ? !hasModule('tramites') : role === 'finanzas') { setFiles([]); setLoadingFiles(false); return }
     setLoadingFiles(true)
     try {
-      setFiles(await listExpedientes(organization.id))
+      if (local) {
+        const response = await fetch('/api/sigep/expedientes?fecha_desde=1900-01-01')
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'No fue posible consultar los expedientes.')
+        setFiles(data.expedientes.map(file => ({
+          ...emptyFile,
+          _id: file.id,
+          id: file.folio,
+          tipo: file.tipo_tramite === 'titulacion' ? 'Titulación' : 'Búsqueda de información',
+          propietario: file.solicitante,
+          lote: file.claves_catastrales?.join(', ') || '',
+          estado: ({ listo_para_entrega: 'Listo para entrega', cerrado: 'Cerrado', entregado: 'Entregado' })[file.estado] || file.estado.replaceAll('_', ' '),
+          areaActual: file.area_responsable,
+          siguienteAccion: file.etapa_actual.replaceAll('_', ' '),
+          fechaSolicitud: file.fecha_recepcion?.slice(0, 10) || '',
+          espera: '',
+        })))
+      } else {
+        setFiles(await listExpedientes(organization.id))
+      }
     } catch (error) {
-      console.error('No fue posible cargar los expedientes desde Supabase.', error)
+      console.error('No fue posible cargar los expedientes.', error)
       setNotice(`No se pudieron cargar los expedientes: ${error.message}`)
     } finally {
       setLoadingFiles(false)
     }
   }
 
-  useEffect(() => { refreshFiles() }, [organization.id, role])
+  useEffect(() => { refreshFiles() }, [organization.id, role, local])
 
   const filteredFiles = useMemo(() => files.filter((file) => {
     const query = search.trim().toLocaleLowerCase('es')
@@ -133,7 +163,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
       await saveExpediente(organization.id, editingId, form)
       setDialog(null)
       await refreshFiles()
-      setNotice(editingId ? 'Expediente actualizado correctamente en Supabase.' : 'Nuevo trámite registrado en Supabase.')
+      setNotice(editingId ? 'Expediente actualizado correctamente.' : 'Nuevo trámite registrado.')
       window.setTimeout(() => setNotice(''), 3500)
     } catch (error) {
       console.error('No fue posible guardar el expediente en Supabase.', error)
@@ -152,7 +182,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
       await deleteExpediente(organization.id, id)
       setDialog(null)
       await refreshFiles()
-      setNotice('Expediente eliminado de Supabase.')
+      setNotice('Expediente eliminado.')
       window.setTimeout(() => setNotice(''), 3000)
     } catch (error) {
       console.error('No fue posible eliminar el expediente en Supabase.', error)
@@ -163,7 +193,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
     }
   }
 
-  if (!route) return <p role="alert">Sin acceso a este apartado.</p>
+  if (!route && !local) return <p role="alert">Sin acceso a este apartado.</p>
 
   const openDetails = (file) => setDialog({ type: 'details', file })
 
@@ -173,44 +203,59 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
       <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
         <div className="brand">
           <div className="brand-mark"><Landmark size={23} strokeWidth={1.8} /></div>
-          <div><div className="brand-name">Fundos</div><div className="brand-subtitle">GESTIÓN TERRITORIAL</div></div>
+          <div><div className="brand-name">{productName}</div><div className="brand-subtitle">{firmName || 'Gestión territorial'}</div></div>
           <button className="mobile-close icon-button" onClick={() => setMobileMenu(false)} aria-label="Cerrar menú"><X size={20} /></button>
         </div>
         <div className="area-switcher">
           <span className="area-avatar">{organizationInitials}</span>
-          <span className="area-copy"><small>{organizations.length > 1 ? 'CAMBIAR ORGANIZACIÓN' : 'ORGANIZACIÓN ACTUAL'}</small>{organizations.length > 1 ? <select aria-label="Cambiar organización" value={organization.id} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select> : <><strong>{organization.nombre}</strong><small>Rol: {roles[role] || role}</small></>}</span>
+          <span className="area-copy"><small>{organizations.length > 1 ? 'CAMBIAR ORGANIZACIÓN' : 'ORGANIZACIÓN ACTUAL'}</small>{organizations.length > 1 ? <select aria-label="Cambiar organización" value={organization.id} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select> : <><strong>{organization.nombre}</strong><small>Rol: {roles[role] || (local ? 'Gestión territorial' : role)}</small></>}</span>
         </div>
         <nav className="side-nav" aria-label="Navegación principal">
-          {navItems.filter(item => allowedRoute(routes.find(route => route.label === item.label), role)).map(({ label, icon: Icon, badge }) => (
+          {navItems.filter(item => canOpenRoute(routes.find(route => route.label === item.label))).map(({ label, icon: Icon, badge }) => (
             <button key={label} className={`nav-link ${activeNav === label ? 'nav-active' : ''}`} onClick={() => { setActiveNav(label); setMobileMenu(false) }}>
               <Icon size={21} strokeWidth={1.8} /><span>{label === 'Configuración y seguridad' ? 'Administración' : label}</span>{badge && <span className="nav-badge">{badge}</span>}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="sidebar-user"><div className="user-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || role}</small></div></div>
+          <div className="sidebar-user"><div className="user-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || (local ? 'Gestión territorial' : role)}</small></div></div>
         </div>
       </aside>
 
       <main className="main-area">
         <header className="topbar">
           <button className="mobile-menu icon-button" onClick={() => setMobileMenu(true)} aria-label="Abrir menú"><Menu size={21} /></button>
-          {activeNav === 'Inicio' ? <label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar folio, propietario o lote" aria-label="Buscar folio, propietario o lote" />{search && <button onClick={() => setSearch('')} aria-label="Limpiar búsqueda"><X size={15} /></button>}</label> : <div className="current-section">{activeNav === 'Configuración y seguridad' ? 'Administración' : activeNav}</div>}
+          {activeNav === 'Inicio' ? <label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar folio, propietario o lote" aria-label="Buscar folio, propietario o lote" />{search && <button onClick={() => setSearch('')} aria-label="Limpiar búsqueda"><X size={15} /></button>}</label> : <div className="current-section">{activeNav === 'Configuración y seguridad' ? 'Administración' : activeNav || 'Apartado no disponible'}</div>}
           <div className="topbar-actions">
             {role !== 'finanzas' && <button className="notification icon-button" onClick={() => { setActiveNav('Inicio'); setActiveTab('Prioritarios') }} aria-label={`Ver ${priorityCount} expedientes prioritarios`}><Bell size={20} />{priorityCount > 0 && <i />}</button>}
-            <button className="icon-button signout-button" onClick={onSignOut} aria-label="Cerrar sesión" title={`Cerrar sesión de ${user.email}`}><LogOut size={18} /></button>
-            <div className="top-user"><div className="user-avatar small-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || role}</small></div><ChevronDown size={15} /></div>
+            {onSignOut && <button className="icon-button signout-button" onClick={onSignOut} aria-label="Cerrar sesión" title={`Cerrar sesión de ${user.email}`}><LogOut size={18} /></button>}
+            <div className="top-user"><div className="user-avatar small-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || (local ? 'Gestión territorial' : role)}</small></div><ChevronDown size={15} /></div>
           </div>
         </header>
 
-        {activeNav !== 'Inicio' ? <div className="content">{activeNav === 'Pagos y servicios' ? <PaymentsWorkspace organization={organization} role={role} /> : activeNav === 'Seguimiento de trámites' ? <WorkflowWorkspace organization={organization} user={user} role={role} files={files} refreshFiles={refreshFiles} /> : canModule(role, modules[activeNav]?.key || 'configuracion_seguridad') ? <ModuleWorkspace moduleName={activeNav} organization={organization} user={user} role={role} onSignOut={onSignOut} /> : <p>Sin acceso a este apartado.</p>}</div> : <div className="content">
+        {activeNav !== 'Inicio' ? <div className="content">
+          {local && activeNav === 'Medición y topografía'
+            ? <Suspense fallback={<p role="status">Cargando solicitudes…</p>}><FieldWorkspace role={role} /></Suspense>
+            : local && activeNav === 'Lotes y predios'
+            ? <Suspense fallback={<p role="status">Cargando mapa…</p>}><MapWorkspace lotes canCreateParcel={permissions.altaPredio} canCreateFile={permissions.altaExpediente} /></Suspense>
+            : activeNav === 'Pagos y servicios' ? <PaymentsWorkspace organization={organization} role={role} local={local} canRegister={permissions?.pagos} />
+              : local && activeNav === 'Seguimiento de trámites'
+                ? <section className="sgfl-workspace local-shell">
+                    <header><h1>Seguimiento de trámites</h1><p>Consulta los expedientes, sus predios y movimientos.</p></header>
+                    <Suspense fallback={<p role="status">Cargando expedientes…</p>}><ExpedienteSearch apiBase="/api/sigep" canMeasure={permissions.medicion} role={role} /></Suspense>
+                  </section>
+                : activeNav === 'Seguimiento de trámites' ? <WorkflowWorkspace organization={organization} user={user} role={role} files={files} refreshFiles={refreshFiles} />
+                  : activeNav && (local || canModule(role, modules[activeNav]?.key || 'configuracion_seguridad'))
+                    ? <ModuleWorkspace moduleName={activeNav} organization={organization} user={user} role={role} onSignOut={onSignOut} local={local} />
+                    : <p>Este apartado no está disponible.</p>}
+        </div> : <div className="content">
           <section className="welcome-row">
             <div><div className="eyebrow date-label">{new Intl.DateTimeFormat('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()).toLocaleUpperCase('es-MX')}</div><h1>Buenos días, {user.user_metadata?.nombre || user.email?.split('@')[0]}</h1><p>Tienes <strong className="orange-text">{files.filter((file) => ['Hoy', '1 día'].includes(file.espera)).length} tareas pendientes</strong> en {organization.nombre}.</p></div>
-            {canEdit && <button className="primary-button" onClick={openNew}><Plus size={17} /> Nuevo trámite</button>}
+            {(local ? permissions.altaExpediente : canEdit) && <button className="primary-button" onClick={local ? () => setActiveNav('Lotes y predios') : openNew}><Plus size={17} /> Nuevo trámite</button>}
           </section>
 
           <section className="priority-banner">
-            <div className="priority-copy"><div className="eyebrow aqua">TU TERRITORIO, EN ORDEN</div><h2>{loadingFiles ? 'Preparando tu resumen de trabajo' : priorityCount ? `${priorityCount} expedientes requieren atención` : 'Todo listo para seguir avanzando'}</h2><p>Da seguimiento a cada trámite, desde la recepción hasta la entrega.</p></div>
+            <div className="priority-copy"><div className="eyebrow aqua">SEGUIMIENTO DE EXPEDIENTES</div><h2>{loadingFiles ? 'Preparando tu resumen de trabajo' : priorityCount ? `${priorityCount} expedientes requieren atención` : 'Sin expedientes prioritarios'}</h2><p>Revisa los pendientes y los trámites en recepción.</p></div>
             <div className="priority-counts"><div className="priority-count"><span className="dot red-dot" /><div><strong>{priorityCount}</strong><small>Prioritarios</small></div></div><div className="priority-count"><span className="dot gold-dot" /><div><strong>{unassignedCount}</strong><small>En recepción</small></div></div><button onClick={reviewInbox}>Revisar bandeja <ChevronRight size={16} /></button></div>
           </section>
 
@@ -227,7 +272,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
             </div>
             <div className="table-scroll">
               <div className="table-head"><span>EXPEDIENTE</span><span>SOLICITANTE</span><span>ÁREA ACTUAL</span><span>SIGUIENTE ACCIÓN</span><span>EN ESPERA</span><span /></div>
-              {loadingFiles ? <div className="empty-state"><LoaderCircle className="spin" size={22} /><strong>Cargando expedientes desde Supabase...</strong></div> : filteredFiles.length ? filteredFiles.map((file) => <FileRow key={file._id} file={file} onClick={() => openDetails(file)} />) : <div className="empty-state"><SlidersHorizontal size={22} /><strong>No hay expedientes para mostrar</strong><span>Prueba con otro filtro o registra un nuevo trámite.</span></div>}
+              {loadingFiles ? <div className="empty-state"><LoaderCircle className="spin" size={22} /><strong>Cargando expedientes…</strong></div> : filteredFiles.length ? filteredFiles.map((file) => <FileRow key={file._id} file={file} onClick={() => openDetails(file)} />) : <div className="empty-state"><SlidersHorizontal size={22} /><strong>No hay expedientes para mostrar</strong><span>Prueba con otro filtro o registra un nuevo trámite.</span></div>}
             </div>
             <div className="panel-footer"><span>Mostrando {filteredFiles.length} de {files.length} expedientes</span><button onClick={() => { setActiveNav('Inicio'); setActiveTab('Mi bandeja') }}>Ver todos los expedientes <ChevronRight size={15} /></button></div>
           </section>
@@ -236,12 +281,12 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
             <div className="lower-card"><div className="lower-card-icon green-icon"><CalendarDays size={19} /></div><div><strong>Próximas entregas</strong><p>{files.filter((file) => file.estado === 'Listo para entrega').length} títulos listos para programar su entrega.</p></div><button onClick={() => setActiveNav('Títulos y formatos')} aria-label="Ver próximas entregas"><ChevronRight size={17} /></button></div>
             <div className="lower-card"><div className="lower-card-icon amber-icon"><Wallet size={19} /></div><div><strong>Seguimiento de pagos</strong><p>{files.filter((file) => Number(file.saldoPendiente) > 0).length} expedientes con saldo pendiente.</p></div><button onClick={() => setActiveNav('Pagos y servicios')} aria-label="Ver pagos"><ChevronRight size={17} /></button></div>
           </section>
-          <footer className="page-footer">Fundos · Gestión territorial <span>Ayuda y soporte <CircleHelp size={14} /></span></footer>
+          <footer className="page-footer">{productName} · {firmName || 'Gestión territorial'} <span>Ayuda y soporte <CircleHelp size={14} /></span></footer>
         </div>}
       </main>
 
       {notice && <div className="toast"><Check size={17} />{notice}</div>}
-      {saving && <div className="saving-overlay"><LoaderCircle className="spin" size={17} />Guardando en Supabase...</div>}
+      {saving && <div className="saving-overlay"><LoaderCircle className="spin" size={17} />Guardando expediente…</div>}
       {dialog === 'form' && <FormDialog form={form} setForm={setForm} editing={Boolean(editingId)} saving={saving} onClose={() => setDialog(null)} onSave={saveFile} />}
       {dialog?.type === 'details' && <DetailsDialog file={dialog.file} canEdit={canEdit} onClose={() => setDialog(null)} onEdit={() => openEdit(dialog.file)} onDelete={() => deleteFile(dialog.file._id)} />}
     </div>

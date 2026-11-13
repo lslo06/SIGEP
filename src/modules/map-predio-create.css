@@ -1,0 +1,122 @@
+.sigep-predio-create .create-dialog-backdrop {
+  position: fixed;
+  z-index: 3000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(5, 24, 48, 0.43);
+  backdrop-filter: blur(9px) saturate(115%);
+  -webkit-backdrop-filter: blur(9px) saturate(115%);
+  animation: sigep-dialog-appear 160ms ease-out;
+}
+@keyframes sigep-dialog-appear { from { opacity: 0; } to { opacity: 1; } }
+
+.sigep-predio-create .create-dialog {
+  width: min(930px, 100%);
+  max-height: min(92vh, 870px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #173452;
+  background: rgba(247, 251, 255, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.96);
+  border-radius: 23px;
+  box-shadow: 0 28px 90px rgba(3, 25, 52, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  animation: sigep-dialog-rise 180ms ease-out;
+}
+@keyframes sigep-dialog-rise { from { transform: translateY(8px) scale(0.99); } to { transform: translateY(0) scale(1); } }
+
+.sigep-predio-create .create-dialog-header { display: flex; align-items: center; gap: 12px; padding: 20px 23px 17px; border-bottom: 1px solid rgba(119, 161, 201, 0.2); }
+.sigep-predio-create .create-dialog-icon { width: 39px; height: 39px; flex: 0 0 auto; display: grid; place-items: center; color: #1765a4; background: linear-gradient(145deg, #e5f3ff, #d2eaff); border: 1px solid rgba(110, 171, 221, 0.3); border-radius: 12px; }
+.sigep-predio-create .create-dialog-heading { min-width: 0; }
+.sigep-predio-create .create-dialog-heading > span { display: block; margin-bottom: 4px; color: #5388b5; font-size: 8px; font-weight: 700; letter-spacing: 1px; }
+.sigep-predio-create .create-dialog-heading h2 { margin: 0; color: #153858; font: 700 17px "Libre Franklin", sans-serif; }
+.sigep-predio-create .dialog-close { width: 34px; height: 34px; margin-left: auto; display: grid; place-items: center; color: #6c8297; background: rgba(229, 240, 250, 0.7); border: 1px solid rgba(137, 170, 202, 0.2); border-radius: 10px; }
+.sigep-predio-create .dialog-close:hover { color: #174f83; background: #e5f2fe; }
+.sigep-predio-create .create-dialog-body { overflow: auto; padding: 18px 23px 21px; }
+.sigep-predio-create .dialog-description { margin: 0 0 15px; color: #6b8197; font-size: 11px; line-height: 1.55; }
+
+.sigep-predio-create .geometry-tabs { width: fit-content; display: flex; gap: 3px; margin: 0 0 13px; padding: 3px; background: rgba(220, 235, 249, 0.78); border: 1px solid rgba(137, 172, 207, 0.25); border-radius: 11px; }
+.sigep-predio-create .geometry-tabs button { min-height: 30px; padding: 0 12px; color: #66819a; background: transparent; border: 0; border-radius: 8px; font-size: 9px; font-weight: 700; }
+.sigep-predio-create .geometry-tabs button.active { color: #15538c; background: rgba(255, 255, 255, 0.92); box-shadow: 0 2px 7px rgba(22, 71, 116, 0.1); }
+.sigep-predio-create .wkt-editor { min-width: 0; padding: 13px; background: rgba(255, 255, 255, 0.72); border: 1px solid rgba(137, 172, 207, 0.24); border-radius: 15px; }
+.sigep-predio-create .wkt-label { display: block; margin: 0 0 7px; color: #25496d; font-size: 10px; font-weight: 700; }
+.sigep-predio-create .wkt-editor textarea { width: 100%; min-height: 166px; resize: vertical; padding: 10px 11px; color: #24445f; background: rgba(250, 253, 255, 0.94); border: 1px solid rgba(142, 174, 206, 0.4); border-radius: 9px; font: 10px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.sigep-predio-create .wkt-editor textarea::placeholder { color: #94aabe; }
+.sigep-predio-create .wkt-editor textarea:focus { border-color: #5b9ed5; outline: 3px solid rgba(75, 150, 211, 0.13); }
+.sigep-predio-create .wkt-helper { display: flex; flex-direction: column; gap: 3px; margin-top: 9px; color: #7b90a4; font-size: 9px; line-height: 1.45; }
+.sigep-predio-create .wkt-helper strong { color: #436783; font-size: 9px; }
+.sigep-predio-create .wkt-helper details { margin-top: 4px; padding: 7px 8px; background: rgba(232, 243, 253, 0.76); border: 1px solid rgba(137, 172, 207, 0.2); border-radius: 8px; }
+.sigep-predio-create .wkt-helper summary { color: #3476ad; cursor: pointer; font-weight: 700; }
+.sigep-predio-create .wkt-helper code { display: block; max-height: 85px; overflow: auto; margin-top: 7px; color: #3f5f78; font-size: 8px; overflow-wrap: anywhere; }
+.sigep-predio-create .wkt-helper details button { margin-top: 7px; padding: 5px 8px; color: #1765a4; background: white; border: 1px solid rgba(87, 153, 205, 0.3); border-radius: 7px; font-size: 8px; font-weight: 700; }
+.sigep-predio-create .wkt-valid, .sigep-predio-create .wkt-error { display: flex; align-items: flex-start; gap: 6px; margin: 9px 0 0; font-size: 9px; line-height: 1.45; }
+.sigep-predio-create .wkt-valid { color: #287252; }
+.sigep-predio-create .wkt-error { color: #9c4d4d; }
+.sigep-predio-create .wkt-valid svg, .sigep-predio-create .wkt-error svg { flex: 0 0 auto; }
+
+.sigep-predio-create .geometry-layout { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(270px, 0.95fr); gap: 16px; align-items: stretch; }
+.sigep-predio-create .coordinate-editor { min-width: 0; padding: 12px; background: rgba(255, 255, 255, 0.7); border: 1px solid rgba(137, 172, 207, 0.24); border-radius: 15px; }
+.sigep-predio-create .coordinate-table-head, .sigep-predio-create .coordinate-row { display: grid; grid-template-columns: 34px minmax(82px, 1fr) minmax(82px, 1fr) 28px; align-items: center; gap: 6px; }
+.sigep-predio-create .coordinate-table-head { padding: 1px 0 8px; color: #7c94aa; font-size: 7px; font-weight: 700; letter-spacing: 0.55px; }
+.sigep-predio-create .coordinate-list { max-height: 312px; overflow: auto; padding-right: 2px; }
+.sigep-predio-create .coordinate-row { margin-bottom: 6px; }
+.sigep-predio-create .coordinate-index { width: 25px; height: 25px; display: grid; place-items: center; color: #3978aa; background: #e8f3fd; border: 1px solid #d3e7f8; border-radius: 8px; font-size: 9px; font-weight: 700; }
+.sigep-predio-create .coordinate-row input, .sigep-predio-create .form-field input { min-width: 0; width: 100%; min-height: 34px; padding: 0 9px; color: #24445f; background: rgba(250, 253, 255, 0.92); border: 1px solid rgba(142, 174, 206, 0.38); border-radius: 8px; font-size: 10px; }
+.sigep-predio-create .coordinate-row input::placeholder { color: #9aafc1; }
+.sigep-predio-create .coordinate-row input:focus, .sigep-predio-create .form-field input:focus { border-color: #5b9ed5; outline: 3px solid rgba(75, 150, 211, 0.13); }
+.sigep-predio-create .remove-coordinate { width: 27px; height: 27px; display: grid; place-items: center; color: #7890a5; background: transparent; border: 0; border-radius: 7px; }
+.sigep-predio-create .remove-coordinate:hover:not(:disabled) { color: #b04f59; background: #fff0f0; }
+.sigep-predio-create .remove-coordinate:disabled { opacity: 0.22; cursor: not-allowed; }
+.sigep-predio-create .add-coordinate { width: 100%; min-height: 34px; display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 5px; color: #2673b1; background: rgba(231, 244, 255, 0.64); border: 1px dashed rgba(87, 153, 205, 0.5); border-radius: 9px; font-size: 10px; font-weight: 700; }
+.sigep-predio-create .add-coordinate:hover:not(:disabled) { background: #e4f2ff; }
+.sigep-predio-create .add-coordinate:disabled { opacity: 0.5; cursor: not-allowed; }
+.sigep-predio-create .add-coordinate span { margin-left: 3px; color: #7d99b1; font-size: 9px; font-weight: 500; }
+.sigep-predio-create .coordinate-hint { margin: 8px 1px 0; color: #8699ab; font-size: 8px; line-height: 1.45; }
+
+.sigep-predio-create .predio-preview-map { position: relative; min-height: 345px; overflow: hidden; background: linear-gradient(145deg, #eaf4fc, #d9e8f6); border: 1px solid rgba(130, 169, 205, 0.3); border-radius: 15px; }
+.sigep-predio-create .predio-preview-leaflet { width: 100%; height: 100%; min-height: 345px; }
+.sigep-predio-create .preview-empty { position: absolute; z-index: 500; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: #6e8eaa; background: rgba(237, 246, 254, 0.7); text-align: center; pointer-events: none; font-size: 10px; line-height: 1.55; }
+.sigep-predio-create .preview-count { position: absolute; z-index: 1000; right: 10px; bottom: 10px; padding: 6px 9px; color: #174f83; background: rgba(255, 255, 255, 0.86); border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 8px; box-shadow: 0 3px 10px rgba(17, 53, 89, 0.1); backdrop-filter: blur(10px); font-size: 9px; font-weight: 700; }
+
+.sigep-predio-create .dialog-error { display: flex; align-items: center; gap: 7px; margin: 12px 0 0; padding: 9px 11px; color: #9c4d4d; background: #fff0ef; border: 1px solid rgba(215, 139, 133, 0.32); border-radius: 9px; font-size: 10px; }
+.sigep-predio-create .dialog-footer { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(119, 161, 201, 0.19); }
+.sigep-predio-create .primary-action, .sigep-predio-create .secondary-action { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+.sigep-predio-create .primary-action { color: white; background: linear-gradient(120deg, #15538c, #287fbe); border: 1px solid rgba(23, 88, 145, 0.45); box-shadow: 0 6px 15px rgba(27, 99, 160, 0.16); }
+.sigep-predio-create .primary-action:hover:not(:disabled) { filter: brightness(1.06); }
+.sigep-predio-create .primary-action:disabled { opacity: 0.48; cursor: not-allowed; }
+.sigep-predio-create .secondary-action { color: #58738c; background: rgba(255, 255, 255, 0.7); border: 1px solid rgba(137, 170, 202, 0.35); }
+.sigep-predio-create .secondary-action:hover:not(:disabled) { background: #edf6ff; }
+.sigep-predio-create .secondary-action:disabled { opacity: 0.55; cursor: wait; }
+.sigep-predio-create .spin { animation: sigep-predio-spin 1s linear infinite; }
+@keyframes sigep-predio-spin { to { transform: rotate(360deg); } }
+
+.sigep-predio-create .confirmed-shape { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 11px; color: #287252; background: rgba(225, 246, 235, 0.82); border: 1px solid rgba(127, 195, 156, 0.36); border-radius: 10px; font-size: 10px; font-weight: 700; }
+.sigep-predio-create .confirmed-shape button { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; color: #397b60; background: transparent; border: 0; font-size: 9px; font-weight: 600; }
+.sigep-predio-create .predio-fields-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px 12px; }
+.sigep-predio-create .form-field { min-width: 0; display: flex; flex-direction: column; gap: 5px; color: #58738d; font-size: 9px; font-weight: 700; }
+.sigep-predio-create .form-field > span b { color: #bf5558; }
+.sigep-predio-create .form-field input, .sigep-predio-create .form-field select, .sigep-predio-create .form-field textarea { min-width: 0; width: 100%; padding: 8px 9px; color: #24445f; background: rgba(250, 253, 255, 0.92); border: 1px solid rgba(142, 174, 206, 0.38); border-radius: 8px; font: 10px "Libre Franklin", sans-serif; }
+.sigep-predio-create .form-field input, .sigep-predio-create .form-field select { min-height: 36px; }
+.sigep-predio-create .form-field textarea { resize: vertical; line-height: 1.45; }
+.sigep-predio-create .form-field input:focus, .sigep-predio-create .form-field select:focus, .sigep-predio-create .form-field textarea:focus { border-color: #5b9ed5; outline: 3px solid rgba(75, 150, 211, 0.13); }
+.sigep-predio-create .computed-field input { color: #1d5b8e; background: rgba(229, 242, 254, 0.92); border-color: rgba(99, 163, 214, 0.38); font-weight: 700; }
+.sigep-predio-create .computed-field small { color: #8196aa; font-size: 8px; font-weight: 400; line-height: 1.35; }
+.sigep-predio-create .full-field { margin-bottom: 12px; }
+@media (max-width: 760px) {
+  .sigep-predio-create .create-dialog-backdrop { padding: 9px; }
+  .sigep-predio-create .create-dialog { max-height: 96vh; border-radius: 17px; }
+  .sigep-predio-create .create-dialog-header { padding: 15px; }
+  .sigep-predio-create .create-dialog-body { padding: 14px 15px 16px; }
+  .sigep-predio-create .geometry-layout { grid-template-columns: 1fr; }
+  .sigep-predio-create .predio-preview-map, .sigep-predio-create .predio-preview-leaflet { min-height: 230px; }
+  .sigep-predio-create .coordinate-list { max-height: 230px; }
+  .sigep-predio-create .predio-fields-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sigep-predio-create .confirmed-shape { flex-wrap: wrap; }
+  .sigep-predio-create .confirmed-shape button { margin-left: 0; }
+}
+
+.sigep-predio-create .expediente-dialog { width: min(680px, 100%); }
+.sigep-predio-create .expediente-predio-card { display: grid; gap: .35rem; padding: .75rem; margin-bottom: .8rem; border-radius: .65rem; background: #d5deef; }
+.sigep-predio-create .expediente-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .7rem; }

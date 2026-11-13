@@ -3,6 +3,7 @@ import { AlertCircle, Eye, EyeOff, Landmark, LoaderCircle, LogIn } from 'lucide-
 import App from './App.jsx'
 import { supabase, supabaseConfigured } from './lib/supabase'
 import { loadMemberships } from './lib/memberships'
+import { firmName, productName } from './lib/brand.js'
 
 export default function AuthApp() {
   const [session, setSession] = useState(null)
@@ -36,22 +37,15 @@ export default function AuthApp() {
   }, [])
 
   if (!supabaseConfigured) return <SetupScreen />
-  if (loading) return <LoadingScreen message="Conectando con Supabase..." />
+  if (loading) return <LoadingScreen message="Validando acceso…" />
   if (!session) return <AuthScreen />
   return <OrganizationGate key={session.user.id} session={session} />
 }
 
 function SetupScreen() {
   return <AuthFrame>
-    <div className="auth-eyebrow">CONFIGURACIÓN REQUERIDA</div>
-    <h1>Conecta tu proyecto Supabase</h1>
-    <p className="auth-description">Configura la URL del proyecto y su clave pública para habilitar el inicio de sesión.</p>
-    <div className="setup-steps">
-      <span>1</span><div><strong>Abre Project Settings → API</strong><small>Copia el valor de Project URL (empieza con https:// y termina en .supabase.co).</small></div>
-      <span>2</span><div><strong>Completa el archivo .env.local</strong><code>VITE_SUPABASE_URL=https://tu-proyecto.supabase.co<br />VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...</code></div>
-      <span>3</span><div><strong>Reinicia Vite</strong><small>Detén el servidor con Ctrl+C y ejecuta npm run dev otra vez.</small></div>
-    </div>
-    <p className="auth-note"><AlertCircle size={15} /> No compartas claves secretas ni service_role. El frontend solo debe usar la clave publishable.</p>
+    <h1>Acceso no disponible</h1>
+    <p className="auth-description">Contacta a la administración de tu organización para habilitar el acceso.</p>
   </AuthFrame>
 }
 
@@ -164,5 +158,24 @@ function LoadingScreen({ message }) {
 }
 
 function AuthFrame({ children }) {
-  return <main className="auth-screen"><aside className="auth-story"><span className="auth-story-label">FUNDOS / GESTIÓN TERRITORIAL</span><div className="territory-art" aria-hidden="true"><span /><span /><span /><Landmark size={52} strokeWidth={1} /></div><div><p className="auth-story-label">UN ESPACIO. TODO TU TERRITORIO.</p><h2>Cada predio tiene una historia.<br /><em>Dale seguimiento.</em></h2><p>Expedientes, propietarios y trámites en un solo lugar. Una visión clara para tomar la siguiente decisión.</p></div><span className="auth-story-footer">Orden en tus procesos. Claridad en cada paso.</span></aside><section className="auth-card"><div className="auth-brand"><div className="brand-mark"><Landmark size={23} /></div><div><strong>Fundos</strong><small>GESTIÓN TERRITORIAL</small></div></div>{children}</section><footer>Gestión segura de expedientes y predios</footer></main>
+  return (
+    <main className="auth-screen">
+      <aside className="auth-story">
+        <span className="auth-story-label">{firmName || productName}</span>
+        <div className="territory-art" aria-hidden="true"><span /><span /><span /><Landmark size={52} strokeWidth={1} /></div>
+        <div>
+          <h2>Gestión territorial<br /><em>y catastral</em></h2>
+          <p>Cartografía de predios, expedientes de titulación y seguimiento de trámites.</p>
+        </div>
+      </aside>
+      <section className="auth-card">
+        <div className="auth-brand">
+          <div className="brand-mark"><Landmark size={23} /></div>
+          <div><strong>{productName}</strong><small>{firmName || 'Gestión territorial'}</small></div>
+        </div>
+        {children}
+      </section>
+      {firmName && <footer>{firmName}</footer>}
+    </main>
+  )
 }

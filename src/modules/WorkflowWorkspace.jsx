@@ -36,7 +36,7 @@ export default function WorkflowWorkspace({ organization, user, role, files }) {
   const [selected, setSelected] = useState('')
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('Todos')
-  const [period, setPeriod] = useState({ from: '', to: '', type: '', responsible: '' })
+  const [period, setPeriod] = useState({ from: '', to: '', type: '', responsible: '', area: '', status: '' })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -79,19 +79,36 @@ export default function WorkflowWorkspace({ organization, user, role, files }) {
   useEffect(() => { load() }, [organization.id])
   useEffect(() => {
     let alive = true
-    setDocuments([]); setEvents([]); setDraft({ ...(flow?.datos || {}), responsable: flow?.responsable || '', fecha_compromiso: flow?.fecha_compromiso || '' }); setNote(''); setFileUpload(null); setReturnStage(''); setPrintArtifact(null)
+    setDocuments([]); setDraft({ ...(flow?.datos || {}), responsable: flow?.responsable || '', fecha_compromiso: flow?.fecha_compromiso || '' }); setNote(''); setFileUpload(null); setReturnStage(''); setPrintArtifact(null)
     if (!selected) return
     setDetailLoading(true)
-    Promise.all([
-      supabase.from('sgfl_documentos').select('*').eq('organizacion_id', organization.id).eq('expediente_id', selected).order('creado_en', { ascending: false }),
-      supabase.from('sgfl_bitacora').select('*').eq('organizacion_id', organization.id).eq('expediente_id', selected).order('creado_en', { ascending: false }),
-    ]).then(results => {
-      if (!alive) return
-      if (results.some(r => r.error)) { setError('No se pudo cargar el expediente completo.'); return }
-      setDocuments(results[0].data || []); setEvents(results[1].data || [])
-    }).catch(() => { if (alive) setError('No se pudo conectar con el expediente.') }).finally(() => { if (alive) setDetailLoading(false) })
+    supabase.from('sgfl_documentos').select('*').eq('organizacion_id', organization.id)
+      .eq('expediente_id', selected).order('creado_en', { ascending: false })
+      .then(({ data, error }) => {
+        if (!alive) return
+        if (error) setError('No se pudieron cargar los documentos del expediente.')
+        else setDocuments(data || [])
+      }).catch(() => {
+        if (alive) setError('No se pudo conectar con el expediente.')
+      }).finally(() => { if (alive) setDetailLoading(false) })
     return () => { alive = false }
-  }, [selected, flows])
+  }, [selected, flows, organization.id])
+
+  useEffect(() => {
+    let alive = true
+    if (!selected) return
+    supabase.from('sgfl_bitacora').select('*').eq('organizacion_id', organization.id)
+      .eq('expediente_id', selected).order('creado_en', { ascending: false })
+      .then(({ data, error }) => {
+        if (!alive) return
+        if (error) setError('No se pudo cargar el historial del expediente.')
+        else setEvents(data || [])
+      }).catch(() => {
+        if (alive) setError('No se pudo consultar el historial.')
+      })
+    return () => { alive = false }
+  }, [selected, flows, organization.id])
+
   async function act(action, data = draft) {
     if (busy) return
     setBusy(true); setError('')
@@ -127,6 +144,8 @@ export default function WorkflowWorkspace({ organization, user, role, files }) {
     return (!term || [f.id, f.propietario, f.fundo, f.titulo, f.lote, tracking?.datos?.clave_catastral, tracking?.datos?.folio_predio].some(v => String(v || '').toLocaleLowerCase('es').includes(term)))
       && (!period.from || f.fechaSolicitud >= period.from) && (!period.to || f.fechaSolicitud <= period.to)
       && (!period.type || f.tipo === period.type)
+      && (!period.area || String(f.areaActual || '').toLocaleLowerCase('es').includes(period.area.trim().toLocaleLowerCase('es')))
+      && (!period.status || (tracking?.estado || f.estado) === period.status)
       && (!period.responsible || String(tracking?.responsable || '').toLowerCase().includes(period.responsible.toLowerCase()))
       && (filter !== 'Vencidos' || overdue(tracking, today))
       && (filter !== 'Mis asignados' || tracking?.responsable === user.email)
@@ -139,16 +158,16 @@ export default function WorkflowWorkspace({ organization, user, role, files }) {
   const field = ([key, label, type = 'text'], disabled) => <label key={key}>{label}{Array.isArray(type) ? <select disabled={disabled} value={draft[key] || ''} onChange={e => setDraft({ ...draft, [key]: e.target.value })}><option value="">Seleccionar…</option>{type.map(v => <option key={v}>{v}</option>)}</select> : type === 'textarea' ? <textarea disabled={disabled} value={draft[key] || ''} onChange={e => setDraft({ ...draft, [key]: e.target.value })} /> : <input disabled={disabled} type={type} value={draft[key] || ''} onChange={e => setDraft({ ...draft, [key]: e.target.value })} />}</label>
   function exportCsv() {
     const escape = v => '"' + String(v || '').replace(/^[=+@\-\t\r]/, "'$&").replaceAll('"', '""') + '"'
-    const csv = [['Folio', 'Tipo', 'Solicitante', 'Municipio / fundo', 'Etapa', 'Responsable', 'Compromiso', 'Estado', 'Días totales'], ...filtered.map(f => { const s = flows.find(s => s.expediente_id === f._id); return [f.id, f.tipo, f.propietario, f.fundo, stageFor(f, s)[1], s?.responsable, s?.fecha_compromiso, s?.cerrado ? 'Cerrado' : s?.estado || 'Activo', f.fechaSolicitud ? Math.max(0, Math.floor((new Date(s?.cerrado_en || today) - new Date(f.fechaSolicitud)) / 86400000)) : ''] })].map(row => row.map(escape).join(',')).join('\r\n')
+    const csv = [['Folio', 'Tipo', 'Solicitante', 'Municipio / fundo', 'Área actual', 'Etapa', 'Responsable', 'Compromiso', 'Estado', 'Días totales'], ...filtered.map(f => { const s = flows.find(s => s.expediente_id === f._id); return [f.id, f.tipo, f.propietario, f.fundo, f.areaActual, stageFor(f, s)[1], s?.responsable, s?.fecha_compromiso, s?.estado || f.estado, f.fechaSolicitud ? Math.max(0, Math.floor((new Date(s?.cerrado_en || today) - new Date(f.fechaSolicitud)) / 86400000)) : ''] })].map(row => row.map(escape).join(',')).join('\r\n')
     const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = 'seguimiento-fundos.csv'; a.click(); URL.revokeObjectURL(url)
   }
-  return <section className="sgfl-workspace"><header><p className="eyebrow">BANDEJA POR ÁREA</p><h1>Seguimiento de trámites</h1><p>Titulación y búsqueda de información, desde la recepción hasta el archivo. Las actividades cartográficas se realizan en la aplicación externa.</p></header>
+  return <section className="sgfl-workspace"><header><p className="eyebrow">BANDEJA POR ÁREA</p><h1>Seguimiento de trámites</h1><p>Titulación y búsqueda de información, desde la recepción hasta el archivo.</p></header>
     <div className="sgfl-stats"><span>{files.length} expedientes</span><span>{flows.filter(s => !s.cerrado).length} en seguimiento</span><span>{flows.filter(s => s.cerrado).length} cerrados</span><span>{flows.filter(s => overdue(s, today)).length} vencidos</span><span>{flows.filter(s => s.estado === 'Prevenido').length} prevenidos</span></div>
     {indicators && <details className="sgfl-card"><summary>Tiempos de atención de la organización</summary><p>Resolución promedio: {indicators.dias_resolucion == null ? 'sin expedientes cerrados' : `${indicators.dias_resolucion} días`}. Se calcula con los movimientos registrados; los expedientes históricos sin seguimiento no se incluyen.</p><ul>{indicators.etapas.map(item => <li key={item.etapa}>{item.etapa}: {item.dias_promedio} días de promedio · {item.completadas} etapas completadas</li>)}</ul></details>}
     <div className="sgfl-search"><input aria-label="Buscar expediente" placeholder="Folio, solicitante, lote, título, municipio o clave catastral" value={search} onChange={e => setSearch(e.target.value)} /><select aria-label="Filtrar bandeja" value={filter} onChange={e => setFilter(e.target.value)}>{['Todos', 'Mi área', 'Mis asignados', 'Vencidos', 'Cerrados'].map(v => <option key={v}>{v}</option>)}</select><button className="secondary-button" onClick={exportCsv}>Exportar CSV</button><button className="secondary-button" onClick={load} disabled={busy || loading}>Actualizar</button></div>
-    <details className="sgfl-card"><summary>Filtros del reporte</summary><div className="sgfl-fields"><label>Solicitud desde<input type="date" value={period.from} onChange={e => setPeriod({ ...period, from: e.target.value })} /></label><label>Solicitud hasta<input type="date" min={period.from} value={period.to} onChange={e => setPeriod({ ...period, to: e.target.value })} /></label><label>Tipo de trámite<select value={period.type} onChange={e => setPeriod({ ...period, type: e.target.value })}><option value="">Todos</option><option>Titulación</option><option>Búsqueda de información</option></select></label><label>Responsable<input type="search" value={period.responsible} onChange={e => setPeriod({ ...period, responsible: e.target.value })} /></label></div><p>{filtered.length} expedientes en el resultado. La exportación respeta estos filtros.</p></details>
+    <details className="sgfl-card"><summary>Filtros del reporte</summary><div className="sgfl-fields"><label>Solicitud desde<input type="date" value={period.from} onChange={e => setPeriod({ ...period, from: e.target.value })} /></label><label>Solicitud hasta<input type="date" min={period.from} value={period.to} onChange={e => setPeriod({ ...period, to: e.target.value })} /></label><label>Tipo de trámite<select value={period.type} onChange={e => setPeriod({ ...period, type: e.target.value })}><option value="">Todos</option><option>Titulación</option><option>Búsqueda de información</option></select></label><label>Responsable<input type="search" value={period.responsible} onChange={e => setPeriod({ ...period, responsible: e.target.value })} /></label><label>Área actual<input type="search" value={period.area} onChange={e => setPeriod({ ...period, area: e.target.value })} /></label><label>Estado<select value={period.status} onChange={e => setPeriod({ ...period, status: e.target.value })}><option value="">Todos</option>{[...new Set(files.map(item => flows.find(flow => flow.expediente_id === item._id)?.estado || item.estado).filter(Boolean))].map(value => <option key={value}>{value}</option>)}</select></label></div><p>{filtered.length} expedientes en el resultado. La exportación respeta estos filtros.</p></details>
     {error && <p className="sgfl-error" role="alert">{error}</p>}
-    {loading ? <p role="status">Cargando seguimiento…</p> : !files.length ? <div className="sgfl-card module-empty"><h2>Listo para recibir expedientes</h2><p>Aún no hay predios registrados. Al conectar la otra aplicación podrás vincular su folio y clave catastral y dar seguimiento a los trámites.</p></div> : <div className="sgfl-columns"><aside className="sgfl-bandeja">{filtered.map(f => { const s = flows.find(s => s.expediente_id === f._id); return <button key={f._id} className="sgfl-file" aria-pressed={selected === f._id} onClick={() => { if (!busy) setSelected(f._id) }}><strong>{f.id}</strong><span>{f.propietario}</span><small>{stageFor(f, s)[1]}</small><small>{s?.cerrado ? 'Cerrado' : overdue(s, today) ? 'Compromiso vencido' : s?.estado || 'Sin iniciar seguimiento'}</small></button> })}{!filtered.length && <p>Sin coincidencias.</p>}</aside>
+    {loading ? <p role="status">Cargando seguimiento…</p> : !files.length ? <div className="sgfl-card module-empty"><h2>Listo para recibir expedientes</h2><p>Registra un trámite para dar seguimiento a sus etapas, documentos y responsables.</p></div> : <div className="sgfl-columns"><aside className="sgfl-bandeja">{filtered.map(f => { const s = flows.find(s => s.expediente_id === f._id); return <button key={f._id} className="sgfl-file" aria-pressed={selected === f._id} onClick={() => { if (!busy && selected !== f._id) { setEvents([]); setSelected(f._id) } }}><strong>{f.id}</strong><span>{f.propietario}</span><small>{stageFor(f, s)[1]}</small><small>{s?.cerrado ? 'Cerrado' : overdue(s, today) ? 'Compromiso vencido' : s?.estado || 'Sin iniciar seguimiento'}</small></button> })}{!filtered.length && <p>Sin coincidencias.</p>}</aside>
       {!file ? <p>Selecciona un expediente para consultar su proceso.</p> : detailLoading ? <p role="status">Cargando expediente…</p> : <article className="sgfl-detail">
         <section className="sgfl-card"><h2>{file.id} · {file.tipo}</h2><p>{file.propietario} · {file.fundo} · Lote {file.lote}</p><div className="sgfl-pills"><span>{stage[0]} · {stage[1]}</span><span>{flow?.cerrado ? 'Cerrado' : flow?.estado || 'Activo'}</span><span>{flow?.responsable || 'Sin asignar'}</span></div>
           <div className="sgfl-fields">{common.map(([key, label, type, allowed]) => field([key, label, type], busy || flow?.cerrado || !canWork(role, allowed)))}{(detailFields[stage[0]] || []).map(spec => field(spec, busy || !stageEditable || spec[0] === 'revision_jefatura' && !canWork(role, ['jefatura']) || spec[0] === 'autorizacion_direccion' && !canWork(role, ['direccion'])))}</div>

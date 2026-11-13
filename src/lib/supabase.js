@@ -13,5 +13,5 @@ const isValidUrl = value => {
   }
 }
 
-export const supabaseConfigured = isValidUrl(url) && !isPlaceholder(key)
+export const supabaseConfigured = import.meta.env.VITE_SIGEP_BACKEND === 'supabase' && isValidUrl(url) && !isPlaceholder(key)
 export const supabase = supabaseConfigured ? createClient(url, key) : null
