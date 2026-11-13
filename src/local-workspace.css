@@ -60,3 +60,21 @@
 .local-shell .expediente-result small { display: block; }
 .local-shell .expediente-medicion { margin-block: .8rem; }
 .local-shell .expediente-medicion fieldset { display: grid; gap: .6rem; border: 0; padding: 0; }
+.local-shell .expediente-attachments { display: grid; gap: .7rem; margin-top: 1rem; padding-top: .9rem; border-top: 1px solid var(--glass-border); }
+.local-shell .expediente-attachments h4,
+.local-shell .expediente-attachments p { margin: 0; }
+.local-shell .attachment-upload { display: grid; grid-template-columns: minmax(12rem, 1fr) auto; gap: .5rem .75rem; align-items: end; padding: .75rem; border: 1px solid var(--glass-border); border-radius: .7rem; background: var(--cosan-frost); }
+.local-shell .attachment-upload label { display: grid; gap: .35rem; color: var(--cosan-navy); font-size: .85rem; font-weight: 600; }
+.local-shell .attachment-upload input { max-width: 100%; }
+.local-shell .attachment-upload small { grid-column: 1; color: #60758d; }
+.local-shell .attachment-upload button { grid-column: 2; grid-row: 1 / span 2; }
+.local-shell .expediente-attachment-list { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.local-shell .expediente-attachment-list li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: .65rem .75rem; border: 1px solid var(--glass-border); border-radius: .65rem; }
+.local-shell .expediente-attachment-list li span { display: grid; gap: .25rem; min-width: 0; }
+.local-shell .expediente-attachment-list small { overflow-wrap: anywhere; color: #60758d; }
+@media (max-width: 600px) {
+  .local-shell .attachment-upload { grid-template-columns: 1fr; }
+  .local-shell .attachment-upload button,
+  .local-shell .attachment-upload small { grid-column: 1; grid-row: auto; }
+  .local-shell .expediente-attachment-list li { align-items: flex-start; flex-direction: column; }
+}
