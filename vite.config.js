@@ -8,15 +8,18 @@ export default defineConfig({
   server: {
     host: 'localhost',
     proxy: {
-      '^/api/sigep/(?:predios(?:/mapa)?|fundos/predio|pagos|campo|sesion(?:/entrar|/salir)?|admin/usuarios(?:/[0-9a-fA-F-]+)?|modulos/[a-z_]+|expedientes(?:/\\d+(?:/predios/\\d+/medicion)?)?)(?:\\?|$)': {
+      '^/api/sigep/(?:predios(?:/mapa)?|fundos/predio|pagos|campo|sesion(?:/entrar|/salir)?|admin/usuarios(?:/[0-9a-fA-F-]+)?|modulos/[a-z_]+|expedientes(?:/\\d+(?:/predios/\\d+/(?:medicion|archivos(?:/[0-9a-fA-F-]{36})?|evidencia-visita|plano))?)?)(?:\\?|$)': {
         target: 'http://127.0.0.1:8100',
         rewrite: path => path.replace('/api/sigep/', '/api/'),
         bypass(request) {
           if (request.method === 'GET') return undefined
           const sameOrigin = request.headers.origin === `http://${request.headers.host}`
           const json = request.headers['content-type']?.split(';')[0] === 'application/json'
+          const multipart = request.headers['content-type']?.split(';')[0] === 'multipart/form-data'
           const writable = /^\/api\/sigep\/(?:predios|pagos|expedientes(?:\/\d+\/predios\/\d+\/medicion)?)$/.test(request.url || '')
           if (request.method === 'POST' && writable && sameOrigin && json) return undefined
+          const privateUpload = /^\/api\/sigep\/expedientes\/\d+\/predios\/\d+\/(?:evidencia-visita|plano)(?:\?|$)/.test(request.url || '')
+          if (request.method === 'POST' && privateUpload && sameOrigin && multipart) return undefined
           const admin = /^\/api\/sigep\/admin\/usuarios(?:\/[0-9a-fA-F-]+)?$/.test(request.url || '')
           if (admin && sameOrigin && json && ['POST', 'PATCH'].includes(request.method)) return undefined
           if (sameOrigin && json && request.method === 'POST' && ['/api/sigep/sesion/entrar', '/api/sigep/sesion/salir'].includes(request.url)) return undefined
