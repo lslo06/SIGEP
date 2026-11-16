@@ -214,7 +214,7 @@ export const modules = {
 
 export const settingsModule = {
   key: 'configuracion_seguridad',
-  description: 'Usuarios, permisos por módulo y parámetros de conexión al proyecto Supabase.',
+  description: 'Usuarios y permisos por módulo de SIGEP.',
   icon: 'Settings',
   connectionFields: [
     'Usuario', 'Password', 'Servidor', 'Puerto',

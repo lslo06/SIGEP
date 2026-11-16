@@ -2,16 +2,13 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bell, ChevronDown, ChevronRight, CircleHelp, ClipboardList, FileText, Folder,
   House, Map, Menu, Plus, Search, Settings, Users, X, Landmark, Wallet,
-  CalendarDays, Pencil, Check, MapPinned, Trash2, SlidersHorizontal, LogOut, LoaderCircle,
+  CalendarDays, Check, MapPinned, SlidersHorizontal, LogOut, LoaderCircle,
 } from 'lucide-react'
-import { deleteExpediente, listExpedientes, saveExpediente } from './lib/expedientes'
 import ModuleWorkspace from './modules/ModuleWorkspace'
-import WorkflowWorkspace from './modules/WorkflowWorkspace'
 import PaymentsWorkspace from './modules/PaymentsWorkspace'
-import { canCapture, canModule, roles } from './lib/permissions'
-import { modules } from './modules/config'
-import { routes, allowedRoute, findRoute, resolveRoute } from './lib/routes.js'
-import { isPriority, localDate } from './lib/validation.js'
+import { roles } from './lib/permissions'
+import { routes, findRoute } from './lib/routes.js'
+import { isPriority } from './lib/validation.js'
 import { firmName, productName } from './lib/brand.js'
 
 const MapWorkspace = lazy(() => import('./modules/MapWorkspace'))
@@ -48,17 +45,14 @@ function formatMoney(value) {
     : '—'
 }
 
-function App({ user, organization, organizations, role, onSignOut, onOrganizationChange, local = false, permissions }) {
+function App({ user, organization, organizations, role, onSignOut, onOrganizationChange, permissions }) {
   const [files, setFiles] = useState([])
   const [loadingFiles, setLoadingFiles] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [routeHash, setRouteHash] = useState(() => window.location.hash)
   const hasModule = key => key === 'campo' ? permissions?.campo : permissions?.modulos.includes('*') || permissions?.modulos.includes(key)
-  const canOpenRoute = item => Boolean(item && (local ? hasModule(item.key) : allowedRoute(item, role)))
+  const canOpenRoute = item => Boolean(item && hasModule(item.key))
   const requested = findRoute(routeHash)
-  const route = local
-    ? (canOpenRoute(requested) ? requested : routes.find(canOpenRoute))
-    : resolveRoute(routeHash, role)
+  const route = canOpenRoute(requested) ? requested : routes.find(canOpenRoute)
   const activeNav = route?.label
   const setActiveNav = label => {
     const next = routes.find(item => item.label === label)
@@ -74,16 +68,13 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
       window.history.replaceState(null, '', `#${route.path}`)
       setRouteHash(`#${route.path}`)
     }
-  }, [route?.path, routeHash, local])
+  }, [route?.path, routeHash])
   const [activeTab, setActiveTab] = useState('Mi bandeja')
   const [search, setSearch] = useState('')
   const [dialog, setDialog] = useState(null)
-  const [form, setForm] = useState(emptyFile)
-  const [editingId, setEditingId] = useState(null)
   const [mobileMenu, setMobileMenu] = useState(false)
   const [notice, setNotice] = useState('')
   const inboxRef = useRef(null)
-  const canEdit = canCapture(role)
   const organizationInitials = organization.nombre
     .split(/\s+/)
     .filter(Boolean)
@@ -99,10 +90,9 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
   }
 
   const refreshFiles = async () => {
-    if (local ? !hasModule('tramites') : role === 'finanzas') { setFiles([]); setLoadingFiles(false); return }
+    if (!hasModule('tramites')) { setFiles([]); setLoadingFiles(false); return }
     setLoadingFiles(true)
     try {
-      if (local) {
         const response = await fetch('/api/sigep/expedientes?fecha_desde=1900-01-01')
         const data = await response.json()
         if (!response.ok) throw new Error(data.error || 'No fue posible consultar los expedientes.')
@@ -119,9 +109,6 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
           fechaSolicitud: file.fecha_recepcion?.slice(0, 10) || '',
           espera: '',
         })))
-      } else {
-        setFiles(await listExpedientes(organization.id))
-      }
     } catch (error) {
       console.error('No fue posible cargar los expedientes.', error)
       setNotice(`No se pudieron cargar los expedientes: ${error.message}`)
@@ -130,7 +117,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
     }
   }
 
-  useEffect(() => { refreshFiles() }, [organization.id, role, local])
+  useEffect(() => { refreshFiles() }, [organization.id, role])
 
   const filteredFiles = useMemo(() => files.filter((file) => {
     const query = search.trim().toLocaleLowerCase('es')
@@ -140,60 +127,6 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
     const matchesUnassigned = activeTab !== 'Sin asignar' || (file.areaActual === 'Recepción' && !['Vigente', 'Cancelado'].includes(file.estado))
     return matchesSearch && matchesTab && matchesUnassigned
   }), [files, search, activeTab])
-
-  const openNew = () => {
-    if (!canEdit) return
-    setForm({ ...emptyFile, fechaSolicitud: localDate() })
-    setEditingId(null)
-    setDialog('form')
-  }
-
-  const openEdit = (file) => {
-    if (!canEdit) return
-    setForm({ ...emptyFile, ...file })
-    setEditingId(file._id)
-    setDialog('form')
-  }
-
-  const saveFile = async (event) => {
-    event.preventDefault()
-    if (!canEdit || saving) return
-    setSaving(true)
-    try {
-      await saveExpediente(organization.id, editingId, form)
-      setDialog(null)
-      await refreshFiles()
-      setNotice(editingId ? 'Expediente actualizado correctamente.' : 'Nuevo trámite registrado.')
-      window.setTimeout(() => setNotice(''), 3500)
-    } catch (error) {
-      console.error('No fue posible guardar el expediente en Supabase.', error)
-      setNotice(`No se pudo guardar: ${error.message}`)
-      window.setTimeout(() => setNotice(''), 6000)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const deleteFile = async (id) => {
-    if (!['owner', 'admin'].includes(role)) return
-    if (!window.confirm('¿Quieres eliminar este expediente? Esta acción no se puede deshacer.')) return
-    setSaving(true)
-    try {
-      await deleteExpediente(organization.id, id)
-      setDialog(null)
-      await refreshFiles()
-      setNotice('Expediente eliminado.')
-      window.setTimeout(() => setNotice(''), 3000)
-    } catch (error) {
-      console.error('No fue posible eliminar el expediente en Supabase.', error)
-      setNotice(`No se pudo eliminar: ${error.message}`)
-      window.setTimeout(() => setNotice(''), 6000)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (!route && !local) return <p role="alert">Sin acceso a este apartado.</p>
 
   const openDetails = (file) => setDialog({ type: 'details', file })
 
@@ -208,7 +141,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
         </div>
         <div className="area-switcher">
           <span className="area-avatar">{organizationInitials}</span>
-          <span className="area-copy"><small>{organizations.length > 1 ? 'CAMBIAR ORGANIZACIÓN' : 'ORGANIZACIÓN ACTUAL'}</small>{organizations.length > 1 ? <select aria-label="Cambiar organización" value={organization.id} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select> : <><strong>{organization.nombre}</strong><small>Rol: {roles[role] || (local ? 'Gestión territorial' : role)}</small></>}</span>
+          <span className="area-copy"><small>{organizations.length > 1 ? 'CAMBIAR ORGANIZACIÓN' : 'ORGANIZACIÓN ACTUAL'}</small>{organizations.length > 1 ? <select aria-label="Cambiar organización" value={organization.id} onChange={(event) => onOrganizationChange(event.target.value)}>{organizations.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select> : <><strong>{organization.nombre}</strong><small>Rol: {roles[role] || 'Gestión territorial'}</small></>}</span>
         </div>
         <nav className="side-nav" aria-label="Navegación principal">
           {navItems.filter(item => canOpenRoute(routes.find(route => route.label === item.label))).map(({ label, icon: Icon, badge }) => (
@@ -218,7 +151,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="sidebar-user"><div className="user-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || (local ? 'Gestión territorial' : role)}</small></div></div>
+          <div className="sidebar-user"><div className="user-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || 'Gestión territorial'}</small></div></div>
         </div>
       </aside>
 
@@ -229,29 +162,27 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
           <div className="topbar-actions">
             {role !== 'finanzas' && <button className="notification icon-button" onClick={() => { setActiveNav('Inicio'); setActiveTab('Prioritarios') }} aria-label={`Ver ${priorityCount} expedientes prioritarios`}><Bell size={20} />{priorityCount > 0 && <i />}</button>}
             {onSignOut && <button className="icon-button signout-button" onClick={onSignOut} aria-label="Cerrar sesión" title={`Cerrar sesión de ${user.email}`}><LogOut size={18} /></button>}
-            <div className="top-user"><div className="user-avatar small-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || (local ? 'Gestión territorial' : role)}</small></div><ChevronDown size={15} /></div>
+            <div className="top-user"><div className="user-avatar small-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || 'Gestión territorial'}</small></div><ChevronDown size={15} /></div>
           </div>
         </header>
 
         {activeNav !== 'Inicio' ? <div className="content">
-          {local && activeNav === 'Medición y topografía'
+          {activeNav === 'Medición y topografía'
             ? <Suspense fallback={<p role="status">Cargando solicitudes…</p>}><FieldWorkspace role={role} /></Suspense>
-            : local && activeNav === 'Lotes y predios'
+            : activeNav === 'Lotes y predios'
             ? <Suspense fallback={<p role="status">Cargando mapa…</p>}><MapWorkspace lotes canCreateParcel={permissions.altaPredio} canCreateFile={permissions.altaExpediente} /></Suspense>
-            : activeNav === 'Pagos y servicios' ? <PaymentsWorkspace organization={organization} role={role} local={local} canRegister={permissions?.pagos} />
-              : local && activeNav === 'Seguimiento de trámites'
+            : activeNav === 'Pagos y servicios' ? <PaymentsWorkspace role={role} canRegister={permissions?.pagos} />
+              : activeNav === 'Seguimiento de trámites'
                 ? <section className="sgfl-workspace local-shell">
                     <header><h1>Seguimiento de trámites</h1><p>Consulta los expedientes, sus predios y movimientos.</p></header>
                     <Suspense fallback={<p role="status">Cargando expedientes…</p>}><ExpedienteSearch apiBase="/api/sigep" canMeasure={permissions.medicion} role={role} /></Suspense>
                   </section>
-                : activeNav === 'Seguimiento de trámites' ? <WorkflowWorkspace organization={organization} user={user} role={role} files={files} refreshFiles={refreshFiles} />
-                  : activeNav && (local || canModule(role, modules[activeNav]?.key || 'configuracion_seguridad'))
-                    ? <ModuleWorkspace moduleName={activeNav} organization={organization} user={user} role={role} onSignOut={onSignOut} local={local} />
+                : activeNav ? <ModuleWorkspace moduleName={activeNav} organization={organization} />
                     : <p>Este apartado no está disponible.</p>}
         </div> : <div className="content">
           <section className="welcome-row">
             <div><div className="eyebrow date-label">{new Intl.DateTimeFormat('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()).toLocaleUpperCase('es-MX')}</div><h1>Buenos días, {user.user_metadata?.nombre || user.email?.split('@')[0]}</h1><p>Tienes <strong className="orange-text">{files.filter((file) => ['Hoy', '1 día'].includes(file.espera)).length} tareas pendientes</strong> en {organization.nombre}.</p></div>
-            {(local ? permissions.altaExpediente : canEdit) && <button className="primary-button" onClick={local ? () => setActiveNav('Lotes y predios') : openNew}><Plus size={17} /> Nuevo trámite</button>}
+            {permissions.altaExpediente && <button className="primary-button" onClick={() => setActiveNav('Lotes y predios')}><Plus size={17} /> Nuevo trámite</button>}
           </section>
 
           <section className="priority-banner">
@@ -286,9 +217,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
       </main>
 
       {notice && <div className="toast"><Check size={17} />{notice}</div>}
-      {saving && <div className="saving-overlay"><LoaderCircle className="spin" size={17} />Guardando expediente…</div>}
-      {dialog === 'form' && <FormDialog form={form} setForm={setForm} editing={Boolean(editingId)} saving={saving} onClose={() => setDialog(null)} onSave={saveFile} />}
-      {dialog?.type === 'details' && <DetailsDialog file={dialog.file} canEdit={canEdit} onClose={() => setDialog(null)} onEdit={() => openEdit(dialog.file)} onDelete={() => deleteFile(dialog.file._id)} />}
+      {dialog?.type === 'details' && <DetailsDialog file={dialog.file} onClose={() => setDialog(null)} />}
     </div>
   )
 }
@@ -309,35 +238,7 @@ function FileRow({ file, onClick }) {
   </button>
 }
 
-function FormDialog({ form, setForm, editing, saving, onClose, onSave }) {
-  const change = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }))
-  const field = (label, name, options = {}) => <label className={`form-field ${options.wide ? 'field-wide' : ''}`} key={name}><span>{label}{options.required && <b> *</b>}</span>{options.select ? <select name={name} value={form[name] || ''} onChange={change}>{options.select.map((item) => <option key={item}>{item}</option>)}</select> : options.textarea ? <textarea name={name} value={form[name] || ''} onChange={change} rows="3" placeholder={options.placeholder || ''} /> : <input name={name} value={form[name] || ''} onChange={change} type={options.type || 'text'} min={options.type === 'number' ? '0' : undefined} step={options.type === 'number' ? 'any' : undefined} required={options.required} placeholder={options.placeholder || ''} />}</label>
-
-  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="form-dialog" role="dialog" aria-modal="true" aria-labelledby="form-title">
-    <header className="dialog-header"><div><span className="eyebrow">GESTIÓN DE EXPEDIENTES</span><h2 id="form-title">{editing ? 'Editar expediente' : 'Nuevo trámite'}</h2><p>Completa la información del propietario, predio y seguimiento.</p></div><button className="icon-button" onClick={onClose} aria-label="Cerrar"><X size={20} /></button></header>
-    <form onSubmit={onSave}>
-      <div className="form-body">
-        <FormSection icon={Users} title="Identificación del propietario y predio" description="Datos de la persona titular y ubicación del terreno." />
-        <div className="form-grid">{field('Nombre completo del propietario', 'propietario', { required: true, wide: true, placeholder: 'Ej. María Elena Ruiz' })}{field('Fundo o zona territorial', 'fundo', { required: true, placeholder: 'Nombre del fundo' })}{field('Tipo de trámite', 'tipo', { select: ['Titulación', 'Búsqueda de información', 'Partición de terrenos', 'Actualización de datos', 'Otro'] })}{field('Manzana (MZ)', 'manzana', { placeholder: 'Ej. A' })}{field('Lote', 'lote', { required: true, placeholder: 'Número o clave' })}{field('Superficie (m²)', 'superficie', { type: 'number', placeholder: '0' })}</div>
-        <FormSection icon={FileText} title="Datos del título de propiedad" description="Información registral y estado legal actual." />
-        <div className="form-grid">{field('Libro', 'libro')}{field('Número de título', 'titulo')}{field('Fecha de título', 'fechaTitulo', { type: 'date' })}{field('Estado del predio', 'estado', { select: ['En trámite', 'En revisión', 'Vigente', 'Cancelado', 'Pendiente', 'Listo para entrega'] })}{field('Observaciones', 'observacion', { textarea: true, wide: true, placeholder: 'Notas adicionales sobre el estatus del cliente o predio' })}</div>
-        <FormSection icon={CalendarDays} title="Fechas y seguimiento" description="Fechas de solicitud, entrega, pagos y gestiones con dependencias." />
-        <div className="form-grid">{field('Fecha de solicitud', 'fechaSolicitud', { type: 'date' })}{field('Fecha de entrega', 'fechaEntrega', { type: 'date' })}{field('Fecha de pago de servicios', 'fechaPago', { type: 'date' })}{field('Fecha ante Gobierno', 'fechaGobierno', { type: 'date' })}{field('Fecha ante Municipio', 'fechaMunicipio', { type: 'date' })}{field('Fecha de Registro Público', 'fechaRegistro', { type: 'date' })}</div>
-        <FormSection icon={Wallet} title="Costos y saldos" description="Control de costos del terreno y parcialidades recibidas." />
-        <div className="form-grid">{field('Costo del terreno (MXN)', 'costoTerreno', { type: 'number', placeholder: '0.00' })}{field('Parcialidades pagadas (MXN)', 'parcialidades', { type: 'number', placeholder: '0.00' })}{field('Saldo pendiente (MXN)', 'saldoPendiente', { type: 'number', placeholder: '0.00' })}</div>
-        <FormSection icon={ClipboardList} title="Oficios y flujo de trabajo" description="Seguimiento de oficios, firmas y próxima acción." />
-        <div className="form-grid">{field('Número de oficio', 'oficio')}{field('Seguimiento de firmas', 'seguimientoFirmas', { select: ['Sin iniciar', 'En espera de firma', 'En revisión', 'Firmado'] })}{field('Área actual', 'areaActual', { select: ['Recepción', 'Legal', 'Topografía', 'Cartografía', 'Titulación', 'Entrega'] })}{field('En espera', 'espera', { select: ['Hoy', '1 día', '2 días', '3 días', '4 días', '1 semana', 'Sin asignar'] })}{field('Siguiente acción', 'siguienteAccion', { wide: true, placeholder: 'Ej. Asignar visita de campo' })}</div>
-      </div>
-      <footer className="dialog-footer"><span><b>*</b> Campos obligatorios</span><div><button type="button" className="secondary-button" disabled={saving} onClick={onClose}>Cancelar</button><button type="submit" className="primary-button" disabled={saving}><Check size={16} />{editing ? 'Guardar cambios' : 'Crear trámite'}</button></div></footer>
-    </form>
-  </section></div>
-}
-
-function FormSection({ icon: Icon, title, description }) {
-  return <div className="form-section"><span className="section-icon"><Icon size={18} /></span><div><h3>{title}</h3><p>{description}</p></div></div>
-}
-
-function DetailsDialog({ file, canEdit, onClose, onEdit, onDelete }) {
+function DetailsDialog({ file, onClose }) {
   const group = (title, items) => <section className="detail-group"><h3>{title}</h3><div className="detail-grid">{items.map(([label, value]) => <div key={label}><small>{label}</small><strong>{value || '—'}</strong></div>)}</div></section>
   return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="details-dialog" role="dialog" aria-modal="true" aria-labelledby="details-title">
     <header className="dialog-header detail-header"><div><div className="detail-title-line"><span className="detail-file-icon"><FileText size={21} /></span><div><span className="eyebrow">EXPEDIENTE</span><h2 id="details-title">{file.id}</h2></div></div><p>{file.tipo} <span className="detail-divider">·</span> {file.estado}</p></div><button className="icon-button" onClick={onClose} aria-label="Cerrar"><X size={20} /></button></header>
@@ -348,7 +249,7 @@ function DetailsDialog({ file, canEdit, onClose, onEdit, onDelete }) {
       {group('Costos y saldos', [['Costo del terreno', formatMoney(file.costoTerreno)], ['Parcialidades pagadas', formatMoney(file.parcialidades)], ['Saldo pendiente', formatMoney(file.saldoPendiente)]])}
       {group('Oficios y seguimiento', [['Número de oficio', file.oficio], ['Seguimiento de firmas', file.seguimientoFirmas], ['Área actual', file.areaActual], ['Siguiente acción', file.siguienteAccion], ['En espera', file.espera]])}
     </div>
-    <footer className="dialog-footer details-footer"><div><button className="secondary-button" onClick={onClose}>Cerrar</button>{canEdit && <button className="primary-button" onClick={onEdit}><Pencil size={15} /> Editar expediente</button>}</div></footer>
+    <footer className="dialog-footer details-footer"><div><button className="secondary-button" onClick={onClose}>Cerrar</button></div></footer>
   </section></div>
 }
 

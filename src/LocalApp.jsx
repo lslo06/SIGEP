@@ -70,7 +70,7 @@ export default function LocalApp() {
     const { usuario, permisos } = session
     return <>
       {message && <p role="alert">{message}</p>}
-      <App key={usuario.id} local permissions={permisos} role={usuario.rol} onSignOut={signOut}
+      <App key={usuario.id} permissions={permisos} role={usuario.rol} onSignOut={signOut}
         user={{ email: usuario.correo, user_metadata: { nombre: usuario.nombre } }}
         organization={workspace} organizations={[workspace]} />
     </>

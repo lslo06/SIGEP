@@ -1,51 +1,37 @@
 import { useEffect, useState } from 'react'
 import { localDate } from '../lib/validation'
-import { canWork } from '../lib/permissions'
 import { paymentConcepts } from '../lib/workflow'
 import './workflow.css'
 
-export default function PaymentsWorkspace({ organization, role, local = false, canRegister = false }) {
+export default function PaymentsWorkspace({ role, canRegister = false }) {
   const [rows, setRows] = useState([])
   const [query, setQuery] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({ folio: '', concepto: paymentConcepts[0], recibo: '', importe: '', fecha: localDate(), evidencia: '' })
-  const editable = local ? canRegister : canWork(role, ['caja'])
+  const editable = canRegister
   async function load() {
     setLoading(true); setError('')
     try {
-      if (local) {
         const params = new URLSearchParams({ busqueda: query.trim() })
         const response = await fetch(`/api/sigep/pagos?${params}`)
         const data = await response.json()
         if (!response.ok) throw new Error(data.error)
         setRows(data.pagos || [])
-        return
-      }
-      const { supabase } = await import('../lib/supabase')
-      const { data, error } = await supabase.rpc('consultar_pagos_sgfl', { p_organizacion_id: organization.id, p_busqueda: query.trim() })
-      if (error) throw error
-      setRows(data || [])
-    } catch (error) { setRows([]); setError(local && !(error instanceof SyntaxError) ? error.message : 'No se pudo consultar el área de pagos. Intenta nuevamente o contacta a soporte.') }
+    } catch (error) { setRows([]); setError(!(error instanceof SyntaxError) ? error.message : 'No se pudo consultar el área de pagos. Intenta nuevamente o contacta a soporte.') }
     finally { setLoading(false) }
   }
-  useEffect(() => { load() }, [organization?.id, local])
+  useEffect(() => { load() }, [])
   async function save(event) {
     event.preventDefault(); if (!editable || busy) return
     setBusy(true); setError('')
     try {
-      if (local) {
         const response = await fetch('/api/sigep/pagos', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
         })
         const data = await response.json()
         if (!response.ok) throw new Error(data.error)
-      } else {
-        const { supabase } = await import('../lib/supabase')
-        const { error } = await supabase.rpc('registrar_pago_sgfl', { p_organizacion_id: organization.id, p_datos: form })
-        if (error) throw error
-      }
       setForm({ ...form, recibo: '', importe: '', evidencia: '' }); await load()
     } catch (error) { setError(error.message || 'No se pudo guardar el pago.') }
     finally { setBusy(false) }
