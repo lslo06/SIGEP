@@ -226,16 +226,15 @@ async function getMapPredios(url, response) {
   }
 }
 
-async function updatePredioGeometry(request, response, predioId) {
+async function updatePredioGeometry(request, response, predioId, user) {
   let client
   try {
     const body = await readJson(request)
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return sendJson(response, 400, { error: "El contenido enviado no es válido." })
     }
-    const actor = optionalText(body, "actor", 200)
+    const actor = user.correo
     const reason = optionalText(body, "motivo", 1000)
-    if (!actor) return sendJson(response, 400, { error: "Indica quién registra la corrección." })
     if (!reason) return sendJson(response, 400, { error: "Indica el motivo de la corrección." })
     const geometry = parseGeometry(body.geometry)
     client = await pool.connect()
@@ -333,7 +332,7 @@ const expedienteTypes = new Set([
   "constancia_tramite_titulo",
 ])
 
-async function createExpediente(request, response) {
+async function createExpediente(request, response, user) {
   let client
   try {
     const body = await readJson(request)
@@ -409,9 +408,9 @@ async function createExpediente(request, response) {
     }
     await client.query(
       `INSERT INTO movimientos_expediente (
-         expediente_id, etapa_destino, estado, area_destino, observaciones
-       ) VALUES ($1, $2, $3, $4, $5)`,
-      [expediente.id, expediente.etapa_actual, expediente.estado, expediente.area_responsable, "Alta inicial del expediente"],
+         expediente_id, etapa_destino, estado, area_destino, observaciones, actor
+       ) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [expediente.id, expediente.etapa_actual, expediente.estado, expediente.area_responsable, "Alta inicial del expediente", user.correo],
     )
     await client.query("COMMIT")
 
@@ -542,7 +541,8 @@ async function getExpediente(id, response) {
   }
 }
 
-async function pagosExpediente(request, response, url) {
+async function pagosExpediente(request, response, url, user) {
+  let client
   try {
     if (request.method === "GET") {
       const search = optionalText({ search: url.searchParams.get("busqueda") }, "search", 120) || ""
@@ -578,21 +578,41 @@ async function pagosExpediente(request, response, url) {
       || !isValidIsoDate(body.fecha) || body.fecha > today) {
       return sendJson(response, 400, { error: "Indica folio, concepto, recibo, importe, fecha y evidencia válidos." })
     }
-    const { rows: [payment] } = await pool.query(
-      `INSERT INTO public.pagos_expediente (expediente_id, concepto, recibo, importe, fecha, evidencia)
-       SELECT id,$2,$3,$4,$5,$6 FROM public.expedientes
+    client = await pool.connect()
+    await client.query("BEGIN")
+    const { rows: [file] } = await client.query(
+      `SELECT id, etapa_actual, estado, area_responsable FROM public.expedientes
        WHERE folio = $1 AND estado NOT IN ('cerrado', 'entregado', 'no_procede')
-       RETURNING id`,
-      [folio, body.concepto, recibo, importe, body.fecha, evidencia],
+       FOR UPDATE`,
+      [folio],
     )
-    if (!payment) return sendJson(response, 404, { error: "No se encontró un expediente abierto con ese folio." })
+    if (!file) throw Object.assign(new Error("No se encontró un expediente abierto con ese folio."), { status: 404 })
+    const { rows: [payment] } = await client.query(
+      `INSERT INTO public.pagos_expediente (expediente_id, concepto, recibo, importe, fecha, evidencia)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id`,
+      [file.id, body.concepto, recibo, importe, body.fecha, evidencia],
+    )
+    await client.query(
+      `INSERT INTO public.movimientos_expediente
+         (expediente_id, etapa_origen, etapa_destino, estado, area_origen, area_destino, observaciones, actor)
+       VALUES ($1,$2,$2,$3,$4,$4,$5,$6)`,
+      [file.id, file.etapa_actual, file.estado, file.area_responsable,
+        `Pago ${payment.id}: ${body.concepto}. Recibo: ${recibo}. Importe: ${importe}. Fecha: ${body.fecha}. Evidencia: ${evidencia}`,
+        user.correo],
+    )
+    await client.query("COMMIT")
     return sendJson(response, 201, { id: payment.id })
   } catch (error) {
+    if (client) await client.query("ROLLBACK").catch(() => {})
     if (error.status) return sendJson(response, error.status, { error: error.message })
     if (error.code === "23505") return sendJson(response, 409, { error: "El recibo ya se registró para ese concepto." })
     if (error.code === "42P01") return sendJson(response, 503, { error: "Pagos aún no está habilitado en SIGEP." })
+    if (error.code === "42501") return sendJson(response, 503, { error: "La API no tiene permisos para registrar el pago y su historial. Aplica las migraciones de expedientes, pagos y enable_pago_audit_lock.sql." })
     console.error("No se pudo procesar el pago:", error.message)
     return sendJson(response, 500, { error: "No fue posible procesar el pago." })
+  } finally {
+    client?.release()
   }
 }
 
@@ -1063,12 +1083,12 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (url.pathname === "/api/pagos") {
-    if (request.method === "GET" || request.method === "POST") return pagosExpediente(request, response, url)
+    if (request.method === "GET" || request.method === "POST") return pagosExpediente(request, response, url, user)
     return sendJson(response, 405, { error: "Método no permitido." })
   }
 
   if (url.pathname === "/api/expedientes") {
-    if (request.method === "POST") return createExpediente(request, response)
+    if (request.method === "POST") return createExpediente(request, response, user)
     if (request.method === "GET") return searchExpedientes(url, response)
     return sendJson(response, 405, { error: "Método no permitido." })
   }
@@ -1099,7 +1119,7 @@ const server = http.createServer(async (request, response) => {
 
   const geometryMatch = url.pathname.match(/^\/api\/predios\/(\d+)\/geometria$/)
   if (geometryMatch) {
-    if (request.method === "PATCH") return updatePredioGeometry(request, response, geometryMatch[1])
+    if (request.method === "PATCH") return updatePredioGeometry(request, response, geometryMatch[1], user)
     return sendJson(response, 405, { error: "Método no permitido." })
   }
 
