@@ -4,10 +4,14 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { promisify } from 'node:util'
 import * as crypto from 'node:crypto'
+import pathModule from 'node:path'
 
 // Exercise the actual HTTP router and handlers without a live database or listener.
 const source = readFileSync(new URL('../api/server.mjs', import.meta.url), 'utf8')
   .replace(/^import .*$/gm, '')
+  // The handler runs in a CommonJS-style VM sandbox; give the ESM-only
+  // import.meta-based storage default a harmless test path in that sandbox.
+  .replace("path.join(path.dirname(fileURLToPath(import.meta.url)), 'private-files')", "path.join('api', 'private-files')")
 const user = { id: 'test-user', correo: 'caja@sigep.test', rol: 'admin' }
 const file = { id: 12, etapa_actual: 'recepcion', estado: 'recibido', area_responsable: 'Ventanilla' }
 const geometry = { type: 'Polygon', coordinates: [[[-104, 24], [-104.01, 24], [-104, 24.01], [-104, 24]]] }
@@ -38,7 +42,7 @@ async function invoke(path, body, { fail, missing = false, authenticated = true,
     return query(sql, params)
   }, connect: async () => client }
   vm.runInNewContext(source, {
-    ...crypto, scryptCallback: crypto.scrypt, promisify, URL, Buffer,
+    ...crypto, scryptCallback: crypto.scrypt, promisify, URL, Buffer, path: pathModule,
     Pool: function () { return pool },
     http: { createServer(fn) { handler = fn; return { listen() {}, close() {} } } },
     process: { env: {}, on() {} }, console: { log() {}, error() {} },
