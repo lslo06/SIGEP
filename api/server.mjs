@@ -1,7 +1,11 @@
 import { promisify } from 'node:util'
-import { createHash, timingSafeEqual, randomBytes, scrypt as scryptCallback } from 'node:crypto'
+import { createHash, timingSafeEqual, randomBytes, randomUUID, scrypt as scryptCallback } from 'node:crypto'
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import http from "node:http"
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Pool } from "pg"
+import { canReadAttachment, canUploadAttachment, readAttachmentUpload } from './attachments.mjs'
 
 const port = Number(process.env.PORT || 8100)
 const pool = new Pool({
@@ -14,6 +18,9 @@ const pool = new Pool({
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
 })
+const privateStorageDirectory = path.resolve(
+  process.env.SIGEP_PRIVATE_STORAGE_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'private-files'),
+)
 
 function sendJson(response, status, payload) {
   response.writeHead(status, {
@@ -717,6 +724,158 @@ async function expedienteMedicion(request, response, expedienteId, predioId, use
   }
 }
 
+async function attachmentContext(client, expedienteId, predioId, { lock = false } = {}) {
+  const rowLock = lock ? ' FOR UPDATE OF e' : ''
+  const { rows: [expediente] } = await client.query(
+    `SELECT e.tipo_tramite, e.estado, e.etapa_actual, e.area_responsable
+     FROM public.expedientes e
+     JOIN public.expediente_predios ep ON ep.expediente_id = e.id
+     WHERE e.id = $1 AND ep.predio_id = $2${rowLock}`,
+    [expedienteId, predioId],
+  )
+  if (!expediente) return { expediente: null, medicion: null }
+  const { rows: [medicion] } = await client.query(
+    `SELECT estado, responsable_id FROM public.mediciones_expediente
+     WHERE expediente_id = $1 AND predio_id = $2${lock ? ' FOR UPDATE' : ''}`,
+    [expedienteId, predioId],
+  )
+  return { expediente, medicion: medicion || null }
+}
+
+function attachmentMetadata(row) {
+  return {
+    id: row.id,
+    tipo: row.tipo,
+    version: row.version,
+    nombre: row.nombre_archivo,
+    mime_type: row.mime_type,
+    bytes: Number(row.bytes),
+    creado_en: row.creado_en,
+  }
+}
+
+async function listOrDownloadAttachments(response, expedienteId, predioId, fileId, user) {
+  try {
+    const context = await attachmentContext(pool, expedienteId, predioId)
+    if (!context.expediente) return sendJson(response, 404, { error: 'No se encontró el expediente y predio vinculados.' })
+    const query = fileId
+      ? pool.query(
+        `SELECT id, expediente_id, predio_id, tipo, version, nombre_archivo, mime_type, bytes, creado_en
+         FROM public.archivos_expediente WHERE expediente_id = $1 AND predio_id = $2 AND id = $3`,
+        [expedienteId, predioId, fileId],
+      )
+      : pool.query(
+        `SELECT id, expediente_id, predio_id, tipo, version, nombre_archivo, mime_type, bytes, creado_en
+         FROM public.archivos_expediente WHERE expediente_id = $1 AND predio_id = $2
+         ORDER BY tipo, version DESC, creado_en DESC`,
+        [expedienteId, predioId],
+      )
+    const { rows } = await query
+    if (!fileId) {
+      const visible = rows.filter(row => canReadAttachment({
+        type: row.tipo, role: user.rol, userId: user.id, measurement: context.medicion,
+      }))
+      return sendJson(response, 200, { archivos: visible.map(attachmentMetadata) })
+    }
+
+    const file = rows[0]
+    if (!file || !canReadAttachment({ type: file.tipo, role: user.rol, userId: user.id, measurement: context.medicion })) {
+      return sendJson(response, 404, { error: 'No se encontró el archivo disponible para tu cuenta.' })
+    }
+    const storedPath = path.join(privateStorageDirectory, file.id)
+    let contents
+    try {
+      contents = await readFile(storedPath)
+    } catch {
+      return sendJson(response, 503, { error: 'El registro existe, pero el archivo privado no está disponible.' })
+    }
+    const asciiName = file.nombre_archivo.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
+    response.writeHead(200, {
+      'Content-Type': file.mime_type,
+      'Content-Length': contents.length,
+      'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(file.nombre_archivo)}`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+    })
+    return response.end(contents)
+  } catch (error) {
+    console.error('No se pudieron consultar los archivos del expediente:', error.code || error.message)
+    if (error.code === '42P01') return sendJson(response, 503, { error: 'El almacenamiento de expedientes requiere su migración SQL.' })
+    return sendJson(response, 500, { error: 'No se pudieron consultar los archivos del expediente.' })
+  }
+}
+
+async function uploadExpedienteAttachment(request, response, expedienteId, predioId, type, user) {
+  let upload
+  try {
+    upload = await readAttachmentUpload(request)
+  } catch (error) {
+    return sendJson(response, error.status || 400, { error: error.message || 'El archivo no es válido.' })
+  }
+
+  let client
+  let storedPath
+  try {
+    client = await pool.connect()
+    await client.query('BEGIN')
+    const { expediente, medicion } = await attachmentContext(client, expedienteId, predioId, { lock: true })
+    if (!expediente || expediente.tipo_tramite !== 'titulacion' || ['cerrado', 'entregado', 'no_procede'].includes(expediente.estado)) {
+      throw Object.assign(new Error('Selecciona un predio vinculado a un expediente de titulación abierto.'), { status: 409 })
+    }
+    if (!canUploadAttachment({ type, role: user.rol, userId: user.id, measurement: medicion })) {
+      if (type === 'evidencia_visita' && user.rol === 'topografia' && medicion?.responsable_id !== user.id) {
+        throw Object.assign(new Error('Solo el topógrafo asignado puede adjuntar evidencia a esta visita.'), { status: 403 })
+      }
+      if (type === 'evidencia_visita' && user.rol === 'topografia') {
+        throw Object.assign(new Error('Registra la visita asignada antes de adjuntar la evidencia.'), { status: 409 })
+      }
+      if (type === 'plano' && ['cartografia', 'admin'].includes(user.rol)) {
+        throw Object.assign(new Error('Confirma la medición o registra la visita antes de adjuntar el plano.'), { status: 409 })
+      }
+      throw Object.assign(new Error('Tu rol no permite adjuntar este tipo de archivo.'), { status: 403 })
+    }
+
+    const id = randomUUID()
+    const { rows: [versionRow] } = await client.query(
+      `SELECT COALESCE(MAX(version), 0) + 1 AS version
+       FROM public.archivos_expediente WHERE expediente_id = $1 AND predio_id = $2 AND tipo = $3`,
+      [expedienteId, predioId, type],
+    )
+    const version = Number(versionRow.version)
+    await mkdir(privateStorageDirectory, { recursive: true, mode: 0o700 })
+    storedPath = path.join(privateStorageDirectory, id)
+    await writeFile(storedPath, upload.buffer, { flag: 'wx', mode: 0o600 })
+    const { rows: [file] } = await client.query(
+      `INSERT INTO public.archivos_expediente
+         (id, expediente_id, predio_id, tipo, version, nombre_archivo, mime_type, bytes, sha256, subido_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING id, tipo, version, nombre_archivo, mime_type, bytes, creado_en`,
+      [id, expedienteId, predioId, type, version, upload.filename, upload.mimeType, upload.size, upload.sha256, user.id],
+    )
+    const label = type === 'evidencia_visita' ? 'Evidencia de visita' : 'Plano de Cartografía'
+    await client.query(
+      `INSERT INTO public.movimientos_expediente
+         (expediente_id, etapa_origen, etapa_destino, estado, area_origen, area_destino, observaciones, actor)
+       VALUES ($1,$2,$2,$3,$4,$4,$5,$6)`,
+      [expedienteId, expediente.etapa_actual, expediente.estado, expediente.area_responsable,
+        `${label} v${version} adjuntado al predio ${predioId}: ${upload.filename}`, user.correo],
+    )
+    await client.query('COMMIT')
+    storedPath = null
+    return sendJson(response, 201, { archivo: attachmentMetadata(file) })
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {})
+    if (storedPath) await unlink(storedPath).catch(() => {})
+    if (error.status) return sendJson(response, error.status, { error: error.message })
+    console.error('No se pudo guardar el archivo del expediente:', error.code || error.message)
+    if (error.code === '42P01') return sendJson(response, 503, { error: 'El almacenamiento de expedientes requiere su migración SQL.' })
+    return sendJson(response, 500, { error: 'No se pudo guardar el archivo del expediente.' })
+  } finally {
+    client?.release()
+  }
+}
+
 async function getFundosPredio(url, response) {
   const organizationId = url.searchParams.get("organizacion_id")?.trim()
   const fundosId = url.searchParams.get("id_fundos")?.trim()
@@ -797,11 +956,21 @@ function localPermissions(role) {
     pagos: ["admin", "caja"].includes(role),
     campo: ["admin", "cartografia", "topografia"].includes(role),
     medicion: ["admin", "ventanilla", "cartografia", "topografia"].includes(role),
+    archivos: ["admin", "cartografia", "topografia"].includes(role),
+    evidenciaVisita: role === "topografia",
+    plano: ["admin", "cartografia"].includes(role),
   }
 }
 
 function routePermission(path, method, permissions) {
   const has = key => permissions.modulos.includes("*") || permissions.modulos.includes(key)
+  const attachment = path.match(/^\/api\/expedientes\/\d+\/predios\/\d+\/(archivos(?:\/[0-9a-f-]{36})?|evidencia-visita|plano)$/i)
+  if (attachment) {
+    if (method === "GET") return permissions.archivos
+    if (method === "POST" && attachment[1] === "evidencia-visita") return permissions.evidenciaVisita
+    if (method === "POST" && attachment[1] === "plano") return permissions.plano
+    return false
+  }
   if (path === "/api/campo") return method === "GET" && permissions.campo
   if (path === "/api/pagos") return method === "GET" ? has("pagos_servicios") : permissions.pagos
   if (path.startsWith("/api/expedientes/") || path === "/api/expedientes") {
@@ -1077,6 +1246,21 @@ const server = http.createServer(async (request, response) => {
   if (measurementMatch) {
     if (request.method === "GET" || request.method === "POST") {
       return expedienteMedicion(request, response, measurementMatch[1], measurementMatch[2], user)
+    }
+    return sendJson(response, 405, { error: "Método no permitido." })
+  }
+
+  const attachmentsMatch = url.pathname.match(/^\/api\/expedientes\/(\d+)\/predios\/(\d+)\/archivos(?:\/([0-9a-f-]{36}))?$/i)
+  if (attachmentsMatch) {
+    if (request.method === "GET") return listOrDownloadAttachments(response, attachmentsMatch[1], attachmentsMatch[2], attachmentsMatch[3], user)
+    return sendJson(response, 405, { error: "Método no permitido." })
+  }
+
+  const uploadMatch = url.pathname.match(/^\/api\/expedientes\/(\d+)\/predios\/(\d+)\/(evidencia-visita|plano)$/)
+  if (uploadMatch) {
+    if (request.method === "POST") {
+      const type = uploadMatch[3] === "plano" ? "plano" : "evidencia_visita"
+      return uploadExpedienteAttachment(request, response, uploadMatch[1], uploadMatch[2], type, user)
     }
     return sendJson(response, 405, { error: "Método no permitido." })
   }
