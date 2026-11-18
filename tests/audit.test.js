@@ -17,7 +17,7 @@ const file = { id: 12, etapa_actual: 'recepcion', estado: 'recibido', area_respo
 const geometry = { type: 'Polygon', coordinates: [[[-104, 24], [-104.01, 24], [-104, 24.01], [-104, 24]]] }
 const payment = { folio: 'FL-2026-000012', concepto: 'Lote', recibo: 'R-123', importe: 125.50, fecha: '2026-01-01', evidencia: 'archivo/123', actor: 'suplantado' }
 
-async function invoke(path, body, { fail, missing = false, authenticated = true, role = 'admin', method = 'POST' } = {}) {
+async function invoke(path, body, { fail, missing = false, authenticated = true, role = 'admin', method = 'POST', tipoTramite, priorDictamen = false } = {}) {
   const calls = []
   let handler
   let released = false
@@ -27,7 +27,8 @@ async function invoke(path, body, { fail, missing = false, authenticated = true,
     if (fail && sql.includes(fail)) throw Object.assign(new Error('Injected database failure'), { code: fail.includes('pagos_expediente') ? '23505' : 'XX000' })
     if (sql === 'COMMIT') committed = true
     if (sql.includes('FROM public.sesiones_locales')) return { rows: authenticated ? [{ ...user, rol: role }] : [] }
-    if (sql.includes('FROM public.expedientes') && sql.includes('FOR UPDATE')) return { rows: missing ? [] : [file] }
+    if (sql.includes('FROM public.expedientes') && sql.includes('FOR UPDATE')) return { rows: missing ? [] : [{ ...file, tipo_tramite: tipoTramite }] }
+    if (sql.includes("etapa_destino = 'dictamen_legal'")) return { rows: priorDictamen ? [{ id: 25 }] : [] }
     if (sql.includes('FROM predios WHERE')) return { rows: [{ id: 1, clave_catastral: 'P-1' }] }
     if (sql.includes('nextval')) return { rows: [{ year: 2026, number: 1 }] }
     if (sql.includes('INSERT INTO expedientes')) return { rows: [file] }
@@ -89,6 +90,49 @@ test('Invalid payment is rejected before opening a transaction', async () => {
   assert.equal(result.status, 400)
   assert.equal(result.released, false)
 })
+
+const dictamenPath = '/api/expedientes/12/dictamen'
+const legal = { role: 'legal', tipoTramite: 'constancia_tramite_titulo' }
+const dictamen = { decision: 'procede', motivo: '  Datos cotejados  ', actor: 'suplantado' }
+
+for (const [decision, estado] of [['procede', 'en_proceso'], ['no_procede', 'no_procede']]) {
+  test(`Legal guarda ${decision} y el historial en la misma transacción`, async () => {
+    const result = await invoke(dictamenPath, { ...dictamen, decision }, legal)
+    assert.equal(result.status, 201)
+    assert.equal(result.committedAtResponse, true)
+    const writes = result.calls.slice(1)
+    assert.equal(writes[0].sql, 'BEGIN')
+    assert.match(writes[1].sql, /FOR UPDATE/)
+    assert.match(writes[3].sql, /UPDATE public.expedientes/)
+    assert.equal(writes[3].params[1], estado)
+    assert.match(writes[4].sql, /INSERT INTO public.movimientos_expediente/)
+    assert.equal(writes[4].params[2], estado)
+    assert.equal(writes[4].params[4], 'Datos cotejados')
+    assert.equal(writes[4].params[5], user.correo)
+  })
+}
+
+test('Dictamen rechaza una cuenta de consulta y un motivo vacío antes de escribir', async () => {
+  const denied = await invoke(dictamenPath, dictamen, { ...legal, role: 'viewer' })
+  const missingReason = await invoke(dictamenPath, { ...dictamen, motivo: '   ' }, legal)
+  assert.equal(denied.status, 403)
+  assert.equal(missingReason.status, 400)
+  for (const result of [denied, missingReason]) assert.equal(result.calls.some(({ sql }) => sql === 'BEGIN'), false)
+})
+
+for (const [label, options, status] of [
+  ['titulación', { tipoTramite: 'titulacion' }, 409],
+  ['dictamen previo', { priorDictamen: true }, 409],
+  ['fallo al insertar el historial', { fail: 'INSERT INTO public.movimientos_expediente' }, 500],
+]) {
+  test(`Dictamen revierte la transacción ante ${label}`, async () => {
+    const result = await invoke(dictamenPath, dictamen, { ...legal, ...options })
+    assert.equal(result.status, status)
+    assert.equal(result.calls.at(-1).sql, 'ROLLBACK')
+    assert.equal(result.committedAtResponse, false)
+    assert.equal(result.released, true)
+  })
+}
 
 test('Expediente creation records the session actor in its initial movement', async () => {
   const result = await invoke('/api/expedientes', { tipo_tramite: 'titulacion', solicitante: { nombre: 'Prueba' }, predio_ids: [1], actor: 'suplantado' })
