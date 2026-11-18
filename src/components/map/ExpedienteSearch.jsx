@@ -1,5 +1,6 @@
 import ExpedienteMedicion from "./ExpedienteMedicion"
 import ExpedienteDictamen from "./ExpedienteDictamen"
+import { BorradoresDocumento } from "./ExpedienteBorradores"
 import { useState } from "react"
 import { BriefcaseBusiness, CalendarDays, ChevronDown, ChevronUp, Clock3, Search } from "lucide-react"
 
@@ -138,10 +139,11 @@ export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false,
           <div><small>PREDIOS VINCULADOS</small>{detail.predios?.length ? detail.predios.map((parcel) => <span className="detail-parcel" key={parcel.id}><strong>{parcel.clave_catastral}</strong>{propertyLocation(parcel) && <small>{propertyLocation(parcel)}</small>}</span>) : <span>Sin predios vinculados</span>}</div>
         </div>
         <ExpedienteDictamen key={detail.id} expediente={detail} role={role} apiBase={apiBase} onSaved={updateDictamen} />
+        <BorradoresDocumento expediente={detail} tipo={labels[detail.tipo_tramite] || detail.tipo_tramite} />
         {detail.tipo_tramite === "titulacion" && detail.predios?.map(parcel => (
           <section key={`${detail.id}:${parcel.id}`}>
             <strong>{parcel.clave_catastral}</strong>
-            <ExpedienteMedicion expedienteId={detail.id} predioId={parcel.id} role={role} apiBase={apiBase}
+            <ExpedienteMedicion expedienteId={detail.id} predioId={parcel.id} folio={detail.folio} predio={parcel} role={role} apiBase={apiBase}
               closed={!canMeasure || ["cerrado", "entregado", "no_procede"].includes(detail.estado)} />
           </section>
         ))}

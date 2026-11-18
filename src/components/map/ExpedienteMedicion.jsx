@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { BorradorCedula } from "./ExpedienteBorradores"
 
 const labels = {
   medido: "Medido",
@@ -7,7 +8,7 @@ const labels = {
   visitado: "Visita registrada",
 }
 
-export default function ExpedienteMedicion({ expedienteId, predioId, closed, role, topografos = [], onSaved, apiBase = "/api" }) {
+export default function ExpedienteMedicion({ expedienteId, predioId, folio, predio, closed, role, topografos = [], onSaved, apiBase = "/api" }) {
   const [record, setRecord] = useState(null)
   const [ready, setReady] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -141,6 +142,8 @@ export default function ExpedienteMedicion({ expedienteId, predioId, closed, rol
         </>}
       </fieldset>
     </form>}
+    {role === "cartografia" && predio && ["medido", "visitado"].includes(record?.estado) &&
+      <BorradorCedula folio={folio} predio={predio} superficie={record.superficie_m2 ?? predio.superficie} />}
     {canListAttachments && <section className="expediente-attachments" aria-label="Evidencia y plano del predio">
       <h4>Archivos del expediente</h4>
       {canUploadEvidence && <form className="attachment-upload" onSubmit={event => uploadAttachment(event, "evidencia-visita")}>

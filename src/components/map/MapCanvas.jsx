@@ -165,7 +165,7 @@ export default function MapCanvas({
     [basemap],
   )
   const wmsEventHandlers = useMemo(
-    () => ({ load: onWmsLoad, tileerror: onWmsError }),
+    () => ({ tileload: onWmsLoad, tileerror: onWmsError }),
     [onWmsLoad, onWmsError],
   )
 

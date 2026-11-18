@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Map, Mountain, Plus, Satellite } from 'lucide-react'
 import MapCanvas from '../components/map/MapCanvas'
@@ -19,6 +19,9 @@ const basemapOptions = [
 export default function MapWorkspace({ initialKey = '', parcelOnly = false, lotes = false, altas = false, canCreateParcel = false, canCreateFile = false }) {
   const [key, setKey] = useState(initialKey)
   const [basemap, setBasemap] = useState('streets')
+  const [wmsStatus, setWmsStatus] = useState('loading')
+  const onWmsLoad = useCallback(() => setWmsStatus(current => current === 'loading' ? 'loaded' : current), [])
+  const onWmsError = useCallback(() => setWmsStatus('error'), [])
   const [parcelRevision, setParcelRevision] = useState(0)
   const [createOpen, setCreateOpen] = useState(false)
   const [expedientePredio, setExpedientePredio] = useState(null)
@@ -134,18 +137,27 @@ export default function MapWorkspace({ initialKey = '', parcelOnly = false, lote
           {basemapOptions.map(({ id, label, Icon }) => (
             <button className="secondary-button" key={id} type="button"
               aria-pressed={basemap === id} disabled={!isWmsConfigured && id !== 'streets'}
-              onClick={() => setBasemap(id)}>
+              onClick={() => {
+                if (id === basemap) return
+                setWmsStatus('loading')
+                setBasemap(id)
+              }}>
               <Icon size={16} /> {label}
             </button>
           ))}
         </div>
       </div>
-      {!isWmsConfigured && <p>Las vistas satelital y topográfica no están disponibles en este momento.</p>}
+      <p role="status">{!isWmsConfigured ? 'QGIS sin configurar en esta instalación. Se muestra el mapa base de calles.'
+        : wmsStatus === 'error' ? 'QGIS: algunas imágenes de la capa seleccionada no se pudieron cargar.'
+          : wmsStatus === 'loaded' ? 'QGIS: la capa seleccionada está respondiendo.'
+            : 'QGIS: cargando la capa seleccionada…'}</p>
       <MapCanvas
         basemap={basemap}
         searchFeature={result?.geometry ? result : null}
         onParcelSelect={setResult}
         parcelReloadKey={parcelRevision}
+        onWmsLoad={onWmsLoad}
+        onWmsError={onWmsError}
         viewportApiPath="/api/sigep/predios/mapa"
         fallbackTiles
       />
