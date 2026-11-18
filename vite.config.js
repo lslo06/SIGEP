@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     host: 'localhost',
     proxy: {
-      '^/api/sigep/(?:predios(?:/mapa)?|fundos/predio|pagos|campo|sesion(?:/entrar|/salir)?|admin/usuarios(?:/[0-9a-fA-F-]+)?|modulos/[a-z_]+|expedientes(?:/\\d+(?:/predios/\\d+/(?:medicion|archivos(?:/[0-9a-fA-F-]{36})?|evidencia-visita|plano))?)?)(?:\\?|$)': {
+      '^/api/sigep/(?:predios(?:/mapa)?|fundos/predio|pagos|campo|sesion(?:/entrar|/salir)?|admin/usuarios(?:/[0-9a-fA-F-]+)?|modulos/[a-z_]+|expedientes(?:/\\d+(?:/dictamen|/predios/\\d+/(?:medicion|archivos(?:/[0-9a-fA-F-]{36})?|evidencia-visita|plano))?)?)(?:\\?|$)': {
         target: 'http://127.0.0.1:8100',
         rewrite: path => path.replace('/api/sigep/', '/api/'),
         bypass(request) {
@@ -16,7 +16,7 @@ export default defineConfig({
           const sameOrigin = request.headers.origin === `http://${request.headers.host}`
           const json = request.headers['content-type']?.split(';')[0] === 'application/json'
           const multipart = request.headers['content-type']?.split(';')[0] === 'multipart/form-data'
-          const writable = /^\/api\/sigep\/(?:predios|pagos|expedientes(?:\/\d+\/predios\/\d+\/medicion)?)$/.test(request.url || '')
+          const writable = /^\/api\/sigep\/(?:predios|pagos|expedientes(?:\/\d+\/(?:dictamen|predios\/\d+\/medicion))?)$/.test(request.url || '')
           if (request.method === 'POST' && writable && sameOrigin && json) return undefined
           const privateUpload = /^\/api\/sigep\/expedientes\/\d+\/predios\/\d+\/(?:evidencia-visita|plano)(?:\?|$)/.test(request.url || '')
           if (request.method === 'POST' && privateUpload && sameOrigin && multipart) return undefined

@@ -548,6 +548,64 @@ async function getExpediente(id, response) {
   }
 }
 
+async function registrarDictamen(request, response, expedienteId, user) {
+  let client
+  try {
+    const body = await readJson(request)
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return sendJson(response, 400, { error: "Indica la decisión y el motivo del dictamen." })
+    }
+    const { decision } = body
+    const motivo = optionalText(body, "motivo", 2000)
+    if (!motivo || !["procede", "no_procede"].includes(decision)) {
+      return sendJson(response, 400, { error: "Selecciona Procede o No procede e indica el motivo." })
+    }
+
+    client = await pool.connect()
+    await client.query("BEGIN")
+    const { rows: [file] } = await client.query(
+      `SELECT tipo_tramite, estado, etapa_actual, area_responsable
+       FROM public.expedientes WHERE id = $1 FOR UPDATE`,
+      [expedienteId],
+    )
+    if (!file) throw Object.assign(new Error("No se encontró el expediente."), { status: 404 })
+    if (!expedienteTypes.has(file.tipo_tramite) || file.tipo_tramite === "titulacion") {
+      throw Object.assign(new Error("El dictamen aplica a certificaciones y constancias."), { status: 409 })
+    }
+    const { rows: [prior] } = await client.query(
+      `SELECT id FROM public.movimientos_expediente
+       WHERE expediente_id = $1 AND etapa_destino = 'dictamen_legal' LIMIT 1`,
+      [expedienteId],
+    )
+    if (prior || ["cerrado", "entregado", "no_procede"].includes(file.estado)) {
+      throw Object.assign(new Error("El expediente está cerrado o ya tiene un dictamen."), { status: 409 })
+    }
+
+    const estado = decision === "procede" ? "en_proceso" : "no_procede"
+    const { rows: [expediente] } = await client.query(
+      `UPDATE public.expedientes SET estado = $2, etapa_actual = 'dictamen_legal', area_responsable = 'Legal'
+       WHERE id = $1 RETURNING id, estado, etapa_actual, area_responsable`,
+      [expedienteId, estado],
+    )
+    const { rows: [movimiento] } = await client.query(
+      `INSERT INTO public.movimientos_expediente
+         (expediente_id, etapa_origen, etapa_destino, estado, area_origen, area_destino, observaciones, actor)
+       VALUES ($1, $2, 'dictamen_legal', $3, $4, 'Legal', $5, $6)
+       RETURNING id, etapa_origen, etapa_destino, estado, area_origen, area_destino, observaciones, actor, created_at`,
+      [expedienteId, file.etapa_actual, estado, file.area_responsable, motivo, user.correo],
+    )
+    await client.query("COMMIT")
+    return sendJson(response, 201, { expediente, movimiento })
+  } catch (error) {
+    if (client) await client.query("ROLLBACK").catch(() => {})
+    if (error.status) return sendJson(response, error.status, { error: error.message })
+    console.error("No se pudo guardar el dictamen:", error.code || error.message)
+    return sendJson(response, 500, { error: "No se pudo guardar el dictamen." })
+  } finally {
+    client?.release()
+  }
+}
+
 async function pagosExpediente(request, response, url, user) {
   let client
   try {
@@ -973,6 +1031,7 @@ function localPermissions(role) {
     modulos: role === "admin" ? ["*"] : roleModules[role] || [],
     altaPredio: ["admin", "cartografia", "captura"].includes(role),
     altaExpediente: ["admin", "ventanilla", "captura"].includes(role),
+    dictamen: role === "legal",
     pagos: ["admin", "caja"].includes(role),
     campo: ["admin", "cartografia", "topografia"].includes(role),
     medicion: ["admin", "ventanilla", "cartografia", "topografia"].includes(role),
@@ -984,6 +1043,7 @@ function localPermissions(role) {
 
 function routePermission(path, method, permissions) {
   const has = key => permissions.modulos.includes("*") || permissions.modulos.includes(key)
+  if (/^\/api\/expedientes\/\d+\/dictamen$/.test(path)) return method === "POST" && permissions.dictamen
   const attachment = path.match(/^\/api\/expedientes\/\d+\/predios\/\d+\/(archivos(?:\/[0-9a-f-]{36})?|evidencia-visita|plano)$/i)
   if (attachment) {
     if (method === "GET") return permissions.archivos
@@ -1261,6 +1321,9 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET") return searchExpedientes(url, response)
     return sendJson(response, 405, { error: "Método no permitido." })
   }
+
+  const dictamenMatch = url.pathname.match(/^\/api\/expedientes\/(\d+)\/dictamen$/)
+  if (dictamenMatch) return registrarDictamen(request, response, dictamenMatch[1], user)
 
   const measurementMatch = url.pathname.match(/^\/api\/expedientes\/(\d+)\/predios\/(\d+)\/medicion$/)
   if (measurementMatch) {

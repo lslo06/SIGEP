@@ -1,4 +1,5 @@
 import ExpedienteMedicion from "./ExpedienteMedicion"
+import ExpedienteDictamen from "./ExpedienteDictamen"
 import { useState } from "react"
 import { BriefcaseBusiness, CalendarDays, ChevronDown, ChevronUp, Clock3, Search } from "lucide-react"
 
@@ -74,6 +75,17 @@ export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false,
     }
   }
 
+  function updateDictamen({ expediente, movimiento }) {
+    setDetail(current => current?.id === expediente.id
+      ? { ...current, ...expediente, movimientos: [...(current.movimientos || []), movimiento] }
+      : current)
+    setResults(current => current.flatMap(item => {
+      if (item.id !== expediente.id) return [item]
+      if (filters.estado.trim() && filters.estado.trim().toLowerCase() !== expediente.estado) return []
+      return [{ ...item, ...expediente }]
+    }))
+  }
+
   function clear() {
     setFilters(initialFilters)
     setResults([])
@@ -125,6 +137,7 @@ export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false,
           <div><small>FECHA DE RECEPCIÓN</small><strong>{formatDate(detail.fecha_recepcion)}</strong></div>
           <div><small>PREDIOS VINCULADOS</small>{detail.predios?.length ? detail.predios.map((parcel) => <span className="detail-parcel" key={parcel.id}><strong>{parcel.clave_catastral}</strong>{propertyLocation(parcel) && <small>{propertyLocation(parcel)}</small>}</span>) : <span>Sin predios vinculados</span>}</div>
         </div>
+        <ExpedienteDictamen key={detail.id} expediente={detail} role={role} apiBase={apiBase} onSaved={updateDictamen} />
         {detail.tipo_tramite === "titulacion" && detail.predios?.map(parcel => (
           <section key={`${detail.id}:${parcel.id}`}>
             <strong>{parcel.clave_catastral}</strong>
