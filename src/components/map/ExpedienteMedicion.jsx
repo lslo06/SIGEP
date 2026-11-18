@@ -95,7 +95,8 @@ export default function ExpedienteMedicion({ expedienteId, predioId, closed, rol
     setUploading(kind)
     setAttachmentsError("")
     try {
-      const response = await fetch(`${attachmentsPath}/${kind}`, { method: "POST", body: new FormData(form) })
+      const uploadPath = `${apiBase}/expedientes/${expedienteId}/predios/${predioId}/${kind}`
+      const response = await fetch(uploadPath, { method: "POST", body: new FormData(form) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "No se pudo adjuntar el archivo.")
       form.reset()
