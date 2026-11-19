@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY server.mjs ./
-COPY attachments.mjs ./
+COPY attachments.mjs permissions.mjs users.mjs ./
 RUN mkdir -p /data/private && chown node:node /data/private
 
 ENV NODE_ENV=production

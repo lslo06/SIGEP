@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  LoaderCircle,
+  AlertCircle, LoaderCircle,
   Search, Users,
 } from 'lucide-react'
 import { modules } from './config'
 import LocalAdministration from './LocalAdministration'
 
 export default function ModuleWorkspace({ moduleName, organization }) {
-  if (moduleName === 'Configuración y seguridad') return <LocalAdministration />
+  if (moduleName === 'Configuración y seguridad') return <LocalAdministration sessionAdmin />
   const config = modules[moduleName]
   if (!config) return <p>Este apartado no está disponible.</p>
   return <RecordWorkspace key={config.key} config={config} moduleName={moduleName} organization={organization} />

@@ -1,3 +1,4 @@
+import { localPermissions } from '../../../api/permissions.mjs'
 import { useEffect, useState } from "react"
 import { BorradorCedula } from "./ExpedienteBorradores"
 
@@ -19,7 +20,7 @@ export default function ExpedienteMedicion({ expedienteId, predioId, folio, pred
   const [uploading, setUploading] = useState("")
   const path = `${apiBase}/expedientes/${expedienteId}/predios/${predioId}/medicion`
   const attachmentsPath = `${apiBase}/expedientes/${expedienteId}/predios/${predioId}/archivos`
-  const canListAttachments = ["admin", "cartografia", "topografia"].includes(role)
+  const canListAttachments = localPermissions(role).archivos
 
   useEffect(() => {
     const controller = new AbortController()

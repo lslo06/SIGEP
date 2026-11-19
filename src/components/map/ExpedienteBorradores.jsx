@@ -9,10 +9,10 @@ function descargarBorrador(nombre, lineas) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export function BorradoresDocumento({ expediente, tipo }) {
+export function BorradoresDocumento({ expediente, tipo, role }) {
   const procede = expediente.movimientos?.some(movement =>
     movement.etapa_destino === "dictamen_legal" && movement.estado === "en_proceso")
-  if (!procede) return null
+  if (!procede || role !== 'legal') return null
 
   const ficha = [
     `Folio: ${expediente.folio}`,

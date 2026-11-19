@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.expedientes (
   folio TEXT NOT NULL UNIQUE,
   tipo_tramite TEXT NOT NULL CHECK (tipo_tramite IN (
     'titulacion',
+    'busqueda_informacion',
     'certificacion_antecedentes_titulo',
     'certificacion_copia_titulo',
     'constancia_datos_lote',

@@ -1,3 +1,5 @@
+import { localPermissions } from '../api/permissions.mjs'
+import { createUserManager } from '../api/users.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -17,7 +19,7 @@ const file = { id: 12, etapa_actual: 'recepcion', estado: 'recibido', area_respo
 const geometry = { type: 'Polygon', coordinates: [[[-104, 24], [-104.01, 24], [-104, 24.01], [-104, 24]]] }
 const payment = { folio: 'FL-2026-000012', concepto: 'Lote', recibo: 'R-123', importe: 125.50, fecha: '2026-01-01', evidencia: 'archivo/123', actor: 'suplantado' }
 
-async function invoke(path, body, { fail, missing = false, authenticated = true, role = 'admin', method = 'POST', tipoTramite, priorDictamen = false } = {}) {
+async function invoke(path, body, { fail, missing = false, authenticated = true, role = 'admin', method = 'POST', tipoTramite, priorDictamen = false, readResponses = {} } = {}) {
   const calls = []
   let handler
   let released = false
@@ -39,11 +41,13 @@ async function invoke(path, body, { fail, missing = false, authenticated = true,
   }
   const client = { query, release() { released = true } }
   const pool = { query: async (sql, params) => {
+    const match = Object.keys(readResponses).find(fragment => sql.includes(fragment))
+    if (match) { assert.match(sql.trim(), /^SELECT/); return { rows: readResponses[match] } }
     assert.match(sql, /FROM public.sesiones_locales|FROM public.pagos_expediente/, 'Writes must use the transaction client')
     return query(sql, params)
   }, connect: async () => client }
   vm.runInNewContext(source, {
-    ...crypto, scryptCallback: crypto.scrypt, promisify, URL, Buffer, path: pathModule,
+    localPermissions, createUserManager, ...crypto, scryptCallback: crypto.scrypt, promisify, URL, Buffer, path: pathModule,
     Pool: function () { return pool },
     http: { createServer(fn) { handler = fn; return { listen() {}, close() {} } } },
     process: { env: {}, on() {} }, console: { log() {}, error() {} },
@@ -55,6 +59,31 @@ async function invoke(path, body, { fail, missing = false, authenticated = true,
   await handler(request, response)
   return { ...result, calls, released }
 }
+
+test('Merged document routes preserve role restrictions and accepted-only reading', async () => {
+  const id = '11111111-1111-4111-8111-111111111111'
+  for (const [role, path, method] of [
+    ['viewer', '/api/expedientes/12/documentos', 'POST'],
+    ['captura', `/api/expedientes/12/documentos/${id}/revision`, 'PATCH'],
+    ['digitalizacion', '/api/expedientes/12/predios/1/catastro', 'PATCH'],
+    ['caja', '/api/expedientes/12/documentos', 'GET'],
+  ]) {
+    const r = await invoke(path, {}, { role, method })
+    assert.equal(r.status, 403, `${role} ${path}`)
+    assert.equal(r.calls.some(c => c.sql === 'BEGIN'), false)
+  }
+  const readResponses = {
+    'SELECT id, tipo_tramite, estado FROM public.expedientes': [{ id: 12, tipo_tramite: 'titulacion', estado: 'recibido' }],
+    'FROM public.archivos_expediente d': [{ id, estado_revision: 'pendiente', bytes: 10 }, { id: 'accepted', estado_revision: 'aceptado', bytes: 20 }],
+    'SELECT nombre FROM public.requisitos_documentales': [{ nombre: 'Identificación oficial' }],
+  }
+  const reader = await invoke('/api/expedientes/12/documentos', {}, { role: 'legal', method: 'GET', readResponses })
+  assert.equal(reader.status, 200)
+  assert.deepEqual(reader.body.documentos.map(d => d.id), ['accepted'])
+  const uploader = await invoke('/api/expedientes/12/documentos', {}, { role: 'digitalizacion', method: 'GET', readResponses })
+  assert.equal(uploader.status, 200)
+  assert.equal(uploader.body.documentos.length, 2)
+})
 
 test('Payment and history use one transaction and the authenticated actor', async () => {
   const result = await invoke('/api/pagos', payment)
@@ -140,6 +169,14 @@ test('Expediente creation records the session actor in its initial movement', as
   const movement = result.calls.find(({ sql }) => sql.includes('INSERT INTO movimientos_expediente'))
   assert.equal(movement.params.at(-1), user.correo)
   assert.equal(result.committedAtResponse, true)
+})
+
+test('Actual router denies geometry writes to capture while allowing cartography', async () => {
+  const denied = await invoke('/api/predios/1/geometria', { geometry, motivo: 'Corrección' }, { role: 'captura', method: 'PATCH' })
+  assert.equal(denied.status, 403)
+  assert.equal(denied.calls.some(c => c.sql === 'BEGIN'), false)
+  const allowed = await invoke('/api/predios/1/geometria', { geometry, motivo: 'Corrección' }, { role: 'cartografia', method: 'PATCH' })
+  assert.equal(allowed.status, 200)
 })
 
 for (const actor of [undefined, 'suplantado']) {

@@ -95,7 +95,7 @@ export function canUploadAttachment({ type, role, userId, measurement }) {
 }
 
 export function canReadAttachment({ type, role, userId, measurement }) {
-  if (role === 'admin') return true
+  if (['admin', 'ventanilla', 'direccion', 'jefatura', 'legal', 'digitalizacion', 'captura', 'titulacion', 'informatica', 'viewer'].includes(role)) return ['evidencia_visita', 'plano'].includes(type)
   const measurementComplete = ['medido', 'visitado'].includes(measurement?.estado)
   if (role === 'cartografia') return measurementComplete
   return type === 'evidencia_visita'

@@ -14,7 +14,7 @@ test('Administration routes require an administrative membership', () => {
     assert.equal(resolveRoute('#/configuracion', role).path, '/inicio')
   }
   assert.equal(resolveRoute('#/configuracion', 'admin').path, '/configuracion')
-  assert.equal(resolveRoute('#/configuracion', 'owner').path, '/configuracion')
+  assert.equal(resolveRoute('#/configuracion', 'owner'), undefined)
 })
 
 test('Unknown roles fail closed and invalid URLs fall back internally', () => {

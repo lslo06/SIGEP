@@ -15,7 +15,7 @@ test('Roles operativos separan captura, documentos, títulos y administración',
   assert.equal(canCapture('ventanilla'), true)
   assert.equal(canCapture('direccion'), false)
   assert.equal(canModule('viewer','titulos_formatos',true),false)
-  assert.equal(canModule('titulacion','titulos_formatos',true),true)
+  assert.equal(canModule('titulacion','titulos_formatos',true),false)
   assert.equal(canModule('legal','propietarios',true),false)
   assert.equal(canModule('jefatura','configuracion_seguridad'),false)
   assert.equal(canModule('desconocido','pagos_servicios'),false)

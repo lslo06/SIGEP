@@ -1,6 +1,7 @@
 import ExpedienteMedicion from "./ExpedienteMedicion"
 import ExpedienteDictamen from "./ExpedienteDictamen"
 import { BorradoresDocumento } from "./ExpedienteBorradores"
+import ExpedienteDocumentacion from "./ExpedienteDocumentacion"
 import { useState } from "react"
 import { BriefcaseBusiness, CalendarDays, ChevronDown, ChevronUp, Clock3, Search } from "lucide-react"
 
@@ -8,6 +9,7 @@ const initialFilters = { folio: "", solicitante: "", predio: "", estado: "", fec
 
 const labels = {
   titulacion: "Titulación de fundo legal",
+  busqueda_informacion: "Búsqueda de información",
   certificacion_antecedentes_titulo: "Certificación de antecedentes de título",
   certificacion_copia_titulo: "Certificación de copia de título",
   constancia_datos_lote: "Constancia de antecedentes o datos de lote",
@@ -139,7 +141,8 @@ export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false,
           <div><small>PREDIOS VINCULADOS</small>{detail.predios?.length ? detail.predios.map((parcel) => <span className="detail-parcel" key={parcel.id}><strong>{parcel.clave_catastral}</strong>{propertyLocation(parcel) && <small>{propertyLocation(parcel)}</small>}</span>) : <span>Sin predios vinculados</span>}</div>
         </div>
         <ExpedienteDictamen key={detail.id} expediente={detail} role={role} apiBase={apiBase} onSaved={updateDictamen} />
-        <BorradoresDocumento expediente={detail} tipo={labels[detail.tipo_tramite] || detail.tipo_tramite} />
+        <BorradoresDocumento role={role} expediente={detail} tipo={labels[detail.tipo_tramite] || detail.tipo_tramite} />
+        <ExpedienteDocumentacion expediente={detail} role={role} apiBase={apiBase} />
         {detail.tipo_tramite === "titulacion" && detail.predios?.map(parcel => (
           <section key={`${detail.id}:${parcel.id}`}>
             <strong>{parcel.clave_catastral}</strong>

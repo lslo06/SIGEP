@@ -160,7 +160,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
           <button className="mobile-menu icon-button" onClick={() => setMobileMenu(true)} aria-label="Abrir menú"><Menu size={21} /></button>
           {activeNav === 'Inicio' ? <label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar folio, propietario o lote" aria-label="Buscar folio, propietario o lote" />{search && <button onClick={() => setSearch('')} aria-label="Limpiar búsqueda"><X size={15} /></button>}</label> : <div className="current-section">{activeNav === 'Configuración y seguridad' ? 'Administración' : activeNav || 'Apartado no disponible'}</div>}
           <div className="topbar-actions">
-            {role !== 'finanzas' && <button className="notification icon-button" onClick={() => { setActiveNav('Inicio'); setActiveTab('Prioritarios') }} aria-label={`Ver ${priorityCount} expedientes prioritarios`}><Bell size={20} />{priorityCount > 0 && <i />}</button>}
+            {hasModule('inicio') && <button className="notification icon-button" onClick={() => { setActiveNav('Inicio'); setActiveTab('Prioritarios') }} aria-label={`Ver ${priorityCount} expedientes prioritarios`}><Bell size={20} />{priorityCount > 0 && <i />}</button>}
             {onSignOut && <button className="icon-button signout-button" onClick={onSignOut} aria-label="Cerrar sesión" title={`Cerrar sesión de ${user.email}`}><LogOut size={18} /></button>}
             <div className="top-user"><div className="user-avatar small-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || 'Gestión territorial'}</small></div><ChevronDown size={15} /></div>
           </div>
@@ -209,8 +209,8 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
           </section>
 
           <section className="lower-grid">
-            <div className="lower-card"><div className="lower-card-icon green-icon"><CalendarDays size={19} /></div><div><strong>Próximas entregas</strong><p>{files.filter((file) => file.estado === 'Listo para entrega').length} títulos listos para programar su entrega.</p></div><button onClick={() => setActiveNav('Títulos y formatos')} aria-label="Ver próximas entregas"><ChevronRight size={17} /></button></div>
-            <div className="lower-card"><div className="lower-card-icon amber-icon"><Wallet size={19} /></div><div><strong>Seguimiento de pagos</strong><p>{files.filter((file) => Number(file.saldoPendiente) > 0).length} expedientes con saldo pendiente.</p></div><button onClick={() => setActiveNav('Pagos y servicios')} aria-label="Ver pagos"><ChevronRight size={17} /></button></div>
+            {hasModule('titulos_formatos') && <div className="lower-card"><div className="lower-card-icon green-icon"><CalendarDays size={19} /></div><div><strong>Próximas entregas</strong><p>{files.filter((file) => file.estado === 'Listo para entrega').length} títulos listos para programar su entrega.</p></div><button onClick={() => setActiveNav('Títulos y formatos')} aria-label="Ver próximas entregas"><ChevronRight size={17} /></button></div>}
+            {hasModule('pagos_servicios') && <div className="lower-card"><div className="lower-card-icon amber-icon"><Wallet size={19} /></div><div><strong>Seguimiento de pagos</strong><p>{files.filter((file) => Number(file.saldoPendiente) > 0).length} expedientes con saldo pendiente.</p></div><button onClick={() => setActiveNav('Pagos y servicios')} aria-label="Ver pagos"><ChevronRight size={17} /></button></div>}
           </section>
           <footer className="page-footer">{productName} · {firmName || 'Gestión territorial'} <span>Ayuda y soporte <CircleHelp size={14} /></span></footer>
         </div>}
@@ -244,10 +244,8 @@ function DetailsDialog({ file, onClose }) {
     <header className="dialog-header detail-header"><div><div className="detail-title-line"><span className="detail-file-icon"><FileText size={21} /></span><div><span className="eyebrow">EXPEDIENTE</span><h2 id="details-title">{file.id}</h2></div></div><p>{file.tipo} <span className="detail-divider">·</span> {file.estado}</p></div><button className="icon-button" onClick={onClose} aria-label="Cerrar"><X size={20} /></button></header>
     <div className="details-body">
       <div className="detail-highlight"><span><Users size={17} /> Propietario</span><strong>{file.propietario}</strong><small>{file.fundo} · MZ {file.manzana || '—'} · Lote {file.lote || '—'} · {file.superficie || '—'} m²</small></div>
-      {group('Título de propiedad', [['Libro', file.libro], ['Número de título', file.titulo], ['Fecha de título', file.fechaTitulo], ['Estado', file.estado], ['Observación', file.observacion]])}
-      {group('Fechas y trámites', [['Solicitud', file.fechaSolicitud], ['Entrega', file.fechaEntrega], ['Pago de servicios', file.fechaPago], ['Gobierno', file.fechaGobierno], ['Municipio', file.fechaMunicipio], ['Registro Público', file.fechaRegistro]])}
-      {group('Costos y saldos', [['Costo del terreno', formatMoney(file.costoTerreno)], ['Parcialidades pagadas', formatMoney(file.parcialidades)], ['Saldo pendiente', formatMoney(file.saldoPendiente)]])}
-      {group('Oficios y seguimiento', [['Número de oficio', file.oficio], ['Seguimiento de firmas', file.seguimientoFirmas], ['Área actual', file.areaActual], ['Siguiente acción', file.siguienteAccion], ['En espera', file.espera]])}
+      {group('Seguimiento', [['Fecha de solicitud', file.fechaSolicitud], ['Estado', file.estado], ['Área actual', file.areaActual], ['Etapa actual', file.siguienteAccion]])}
+      <p>Consulta documentos, mediciones e historial en Seguimiento de trámites. Este resumen muestra únicamente los datos recibidos del expediente.</p>
     </div>
     <footer className="dialog-footer details-footer"><div><button className="secondary-button" onClick={onClose}>Cerrar</button></div></footer>
   </section></div>

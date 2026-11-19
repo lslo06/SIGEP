@@ -1,3 +1,5 @@
+import { localPermissions } from './permissions.mjs'
+import { createUserManager } from './users.mjs'
 import { promisify } from 'node:util'
 import { createHash, timingSafeEqual, randomBytes, randomUUID, scrypt as scryptCallback } from 'node:crypto'
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
@@ -333,6 +335,7 @@ async function getPredioGeometryHistory(predioId, response) {
 
 const expedienteTypes = new Set([
   "titulacion",
+  "busqueda_informacion",
   "certificacion_antecedentes_titulo",
   "certificacion_copia_titulo",
   "constancia_datos_lote",
@@ -954,6 +957,203 @@ async function uploadExpedienteAttachment(request, response, expedienteId, predi
   }
 }
 
+const documentRequirements = {
+  titulacion: ['Solicitud de predio', 'Constancia de posesión', 'Identificación oficial', 'Acta de nacimiento', 'Comprobante de domicilio', 'Cédula catastral', 'Otro'],
+  busqueda_informacion: ['Identificación oficial', 'Solicitud escrita', 'Otro'],
+  certificacion_antecedentes_titulo: ['Identificación oficial', 'Solicitud escrita', 'Otro'],
+  certificacion_copia_titulo: ['Identificación oficial', 'Solicitud escrita', 'Otro'],
+  constancia_datos_lote: ['Identificación oficial', 'Solicitud escrita', 'Otro'],
+  constancia_tramite_titulo: ['Identificación oficial', 'Solicitud escrita', 'Otro'],
+}
+
+function documentMetadata(row) {
+  return { id: row.id, requisito: row.requisito, etapa: row.etapa, version: row.version,
+    nombre: row.nombre_archivo, mime_type: row.mime_type, bytes: Number(row.bytes),
+    estado_revision: row.estado_revision, motivo_revision: row.motivo_revision,
+    revisado_en: row.revisado_en, revisor: row.revisor || null, creado_en: row.creado_en }
+}
+
+async function expedienteDocuments(request, response, expedienteId, fileId, user, url) {
+  const canManage = localPermissions(user.rol).documentacion
+  try {
+    const { rows: [expediente] } = await pool.query(
+      'SELECT id, tipo_tramite, estado FROM public.expedientes WHERE id = $1', [expedienteId],
+    )
+    if (!expediente) return sendJson(response, 404, { error: 'No se encontró el expediente.' })
+    if (fileId && request.method === 'GET') {
+      const { rows: [file] } = await pool.query(
+        `SELECT id, requisito, etapa, version, nombre_archivo, mime_type, bytes, sha256, estado_revision,
+           motivo_revision, revisado_en FROM public.archivos_expediente
+         WHERE expediente_id=$1 AND id=$2 AND tipo='documento_general'`, [expedienteId, fileId],
+      )
+      if (!file) return sendJson(response, 404, { error: 'No se encontró el documento.' })
+      if (!canManage && file.estado_revision !== 'aceptado') return sendJson(response, 403, { error: 'Este documento aún no está disponible.' })
+      const contents = await readFile(path.join(privateStorageDirectory, file.id)).catch(() => null)
+      if (!contents) return sendJson(response, 503, { error: 'El archivo privado no está disponible.' })
+      const disposition = url.searchParams.get('inline') === '1' ? 'inline' : 'attachment'
+      response.writeHead(200, { 'Content-Type': file.mime_type, 'Content-Length': contents.length,
+        'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(file.nombre_archivo)}`,
+        'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' })
+      return response.end(contents)
+    }
+    if (request.method === 'GET' && !fileId) {
+      const { rows } = await pool.query(
+        `SELECT d.id, d.requisito, d.etapa, d.version, d.nombre_archivo, d.mime_type, d.bytes,
+           d.estado_revision, d.motivo_revision, d.revisado_en, u.nombre AS revisor, d.creado_en
+         FROM public.archivos_expediente d LEFT JOIN public.usuarios_locales u ON u.id=d.revisado_por
+         WHERE d.expediente_id=$1 AND d.tipo='documento_general'
+         ORDER BY d.requisito, d.version DESC, d.creado_en DESC`, [expedienteId],
+      )
+      const { rows: configured } = await pool.query(
+        'SELECT nombre FROM public.requisitos_documentales WHERE tipo_tramite=$1 AND activo ORDER BY nombre', [expediente.tipo_tramite],
+      )
+      const docs = canManage ? rows : rows.filter(row => row.estado_revision === 'aceptado')
+      return sendJson(response, 200, { requisitos: configured.map(row => row.nombre), documentos: docs.map(documentMetadata) })
+    }
+    if (request.method === 'POST' && !fileId) {
+      if (!canManage) return sendJson(response, 403, { error: 'Tu rol no puede cargar documentos.' })
+      if (['cerrado', 'entregado', 'no_procede'].includes(expediente.estado)) return sendJson(response, 409, { error: 'El expediente está cerrado.' })
+      const requisito = String(url.searchParams.get('requisito') || '').trim().slice(0, 120)
+      const etapa = String(url.searchParams.get('etapa') || '').trim().slice(0, 80)
+      if (!requisito || !etapa) return sendJson(response, 400, { error: 'Selecciona el requisito y la etapa del documento.' })
+      if (!['Recepción', 'Cartografía', 'Valuación', 'Titulación', 'Legal', 'Entrega'].includes(etapa)) return sendJson(response, 400, { error: 'La etapa seleccionada no es válida.' })
+      const { rowCount: validRequirement } = await pool.query(
+        'SELECT 1 FROM public.requisitos_documentales WHERE tipo_tramite=$1 AND nombre=$2 AND activo', [expediente.tipo_tramite, requisito],
+      )
+      if (!validRequirement) return sendJson(response, 400, { error: 'El requisito ya no está activo para este tipo de trámite.' })
+      const upload = await readAttachmentUpload(request)
+      const client = await pool.connect()
+      let storedPath
+      try {
+        await client.query('BEGIN')
+        await client.query('SELECT id FROM public.expedientes WHERE id=$1 FOR UPDATE', [expedienteId])
+        const { rows: [last] } = await client.query(
+          `SELECT COALESCE(MAX(version),0)+1 AS version FROM public.archivos_expediente
+           WHERE expediente_id=$1 AND tipo='documento_general' AND requisito=$2`, [expedienteId, requisito],
+        )
+        const id = randomUUID(), version = Number(last.version)
+        await mkdir(privateStorageDirectory, { recursive: true, mode: 0o700 })
+        storedPath = path.join(privateStorageDirectory, id)
+        await writeFile(storedPath, upload.buffer, { flag: 'wx', mode: 0o600 })
+        const { rows: [row] } = await client.query(
+          `INSERT INTO public.archivos_expediente
+           (id, expediente_id, predio_id, tipo, version, nombre_archivo, mime_type, bytes, sha256, subido_por, requisito, etapa)
+           VALUES ($1,$2,NULL,'documento_general',$3,$4,$5,$6,$7,$8,$9,$10)
+           RETURNING id,requisito,etapa,version,nombre_archivo,mime_type,bytes,estado_revision,motivo_revision,revisado_en,creado_en`,
+          [id, expedienteId, version, upload.filename, upload.mimeType, upload.size, upload.sha256, user.id, requisito, etapa],
+        )
+        await client.query('COMMIT'); storedPath = null
+        return sendJson(response, 201, { documento: documentMetadata(row) })
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {})
+        if (storedPath) await unlink(storedPath).catch(() => {})
+        throw error
+      } finally { client.release() }
+    }
+    if (request.method === 'PATCH' && fileId) {
+      if (!localPermissions(user.rol).revisionDocumentos) return sendJson(response, 403, { error: 'Tu rol no puede revisar documentos.' })
+      const body = await readJson(request)
+      if (!['aceptado', 'rechazado', 'pendiente'].includes(body.estado_revision)) return sendJson(response, 400, { error: 'Selecciona aceptado, rechazado o pendiente.' })
+      const reason = optionalText(body, 'motivo', 1000)
+      if (body.estado_revision === 'rechazado' && !reason) return sendJson(response, 400, { error: 'Indica el motivo del rechazo.' })
+      const { rows: [row] } = await pool.query(
+        `UPDATE public.archivos_expediente SET estado_revision=$3, motivo_revision=$4,
+          revisado_por=$5, revisado_en=now() WHERE expediente_id=$1 AND id=$2 AND tipo='documento_general'
+         RETURNING id,requisito,etapa,version,nombre_archivo,mime_type,bytes,estado_revision,motivo_revision,revisado_en,creado_en`,
+        [expedienteId, fileId, body.estado_revision, reason, user.id],
+      )
+      return row ? sendJson(response, 200, { documento: documentMetadata(row) }) : sendJson(response, 404, { error: 'No se encontró el documento.' })
+    }
+    return sendJson(response, 405, { error: 'Método no permitido.' })
+  } catch (error) {
+    if (error.status) return sendJson(response, error.status, { error: error.message })
+    console.error('No se pudieron procesar documentos del expediente:', error.code || error.message)
+    if (['42P01','42703','42501'].includes(error.code)) return sendJson(response, 503, { error: 'Aplica la migración SQL de documentos generales.' })
+    return sendJson(response, 500, { error: 'No se pudo procesar el documento.' })
+  }
+}
+
+async function configureDocumentRequirements(request, response, user) {
+  if (user.rol !== 'admin') return sendJson(response,403,{error:'Solo Administración puede configurar las listas de requisitos.'})
+  try {
+    const body=await readJson(request)
+    if (!Object.hasOwn(documentRequirements,body.tipo_tramite) || !Array.isArray(body.nombres) || body.nombres.length<1 || body.nombres.length>60 || body.nombres.some(name=>typeof name!=='string'||!name.trim()||name.trim().length>120)) {
+      return sendJson(response,400,{error:'Indica el tipo de trámite y una lista válida de requisitos.'})
+    }
+    const names=[...new Set(body.nombres.map(name=>name.trim()))]
+    const client=await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('UPDATE public.requisitos_documentales SET activo=false WHERE tipo_tramite=$1',[body.tipo_tramite])
+      for(const name of names) await client.query(`INSERT INTO public.requisitos_documentales(tipo_tramite,nombre,activo) VALUES($1,$2,true)
+        ON CONFLICT(tipo_tramite,nombre) DO UPDATE SET activo=true`,[body.tipo_tramite,name])
+      await client.query('COMMIT')
+    } catch(error) { await client.query('ROLLBACK').catch(()=>{}); throw error }
+    finally { client.release() }
+    return sendJson(response,200,{requisitos:names})
+  } catch(error) {
+    if(error.status)return sendJson(response,error.status,{error:error.message})
+    console.error('No se pudo guardar la lista de requisitos:',error.code)
+    return sendJson(response,503,{error:'Aplica la migración de listas de requisitos.'})
+  }
+}
+
+async function expedienteCatastro(request, response, expedienteId, predioId, user) {
+  const canCapture = localPermissions(user.rol).catastro
+  const canRead = localPermissions(user.rol).lecturaCatastro
+  try {
+    if (request.method === 'GET') {
+      if (!canRead) return sendJson(response,403,{error:'Tu rol no puede consultar los datos catastrales de este expediente.'})
+      const [{ rows: [parcel] }, { rows: [data] }] = await Promise.all([
+        pool.query('SELECT 1 FROM public.expediente_predios WHERE expediente_id=$1 AND predio_id=$2', [expedienteId,predioId]),
+        pool.query(`SELECT c.*, u.nombre AS capturista FROM public.datos_catastrales_expediente c
+          JOIN public.usuarios_locales u ON u.id=c.capturado_por WHERE c.expediente_id=$1 AND c.predio_id=$2`, [expedienteId,predioId]),
+      ])
+      if (!parcel) return sendJson(response,404,{error:'El predio no pertenece al expediente.'})
+      return sendJson(response,200,{datos:data||null})
+    }
+    if (request.method === 'PUT') {
+      if (!canCapture) return sendJson(response,403,{error:'Solo Cartografía puede capturar datos catastrales.'})
+      const { rows: [file] } = await pool.query('SELECT estado FROM public.expedientes WHERE id=$1',[expedienteId])
+      if (!file) return sendJson(response,404,{error:'No se encontró el expediente.'})
+      if (['cerrado','entregado','no_procede'].includes(file.estado)) return sendJson(response,409,{error:'El expediente está cerrado.'})
+      const body = await readJson(request)
+      const folio = optionalText(body,'cedula_folio',100), fecha = optionalText(body,'cedula_fecha',10)
+      const valorTerreno=optionalNumber(body,'valor_terreno',{min:0}), valorConstruccion=optionalNumber(body,'valor_construccion',{min:0}), valor=optionalNumber(body,'valor_catastral',{min:0})
+      if (!Array.isArray(body.propietarios) || body.propietarios.length===0 || body.propietarios.length>30 || body.propietarios.some(o=>!o||typeof o.nombre!=='string'||!o.nombre.trim()||o.nombre.length>180)) return sendJson(response,400,{error:'Captura al menos un propietario con nombre válido.'})
+      if (fecha && !isValidIsoDate(fecha)) return sendJson(response,400,{error:'La fecha de cédula no es válida.'})
+      const { rows: [row] } = await pool.query(
+        `INSERT INTO public.datos_catastrales_expediente
+         (expediente_id,predio_id,cedula_folio,cedula_fecha,valor_terreno,valor_construccion,valor_catastral,propietarios,estado_revision,motivo_revision,capturado_por,capturado_en,revisado_por,revisado_en)
+         SELECT $1,$2,$3,$4,$5,$6,$7,$8::jsonb,'pendiente',NULL,$9,now(),NULL,NULL
+         WHERE EXISTS(SELECT 1 FROM public.expediente_predios WHERE expediente_id=$1 AND predio_id=$2)
+         ON CONFLICT(expediente_id,predio_id) DO UPDATE SET cedula_folio=excluded.cedula_folio,cedula_fecha=excluded.cedula_fecha,
+         valor_terreno=excluded.valor_terreno,valor_construccion=excluded.valor_construccion,valor_catastral=excluded.valor_catastral,
+         propietarios=excluded.propietarios,estado_revision='pendiente',motivo_revision=NULL,capturado_por=excluded.capturado_por,capturado_en=now(),revisado_por=NULL,revisado_en=NULL
+         RETURNING *`, [expedienteId,predioId,folio,fecha,valorTerreno,valorConstruccion,valor,JSON.stringify(body.propietarios.map(o=>({nombre:o.nombre.trim(), porcentaje:o.porcentaje||null}))),user.id],
+      )
+      return row ? sendJson(response,200,{datos:row}) : sendJson(response,404,{error:'El predio no pertenece al expediente.'})
+    }
+    if (request.method === 'PATCH') {
+      if (!canCapture) return sendJson(response,403,{error:'Solo Cartografía puede revisar estos datos.'})
+      const { rows: [file] } = await pool.query('SELECT estado FROM public.expedientes WHERE id=$1',[expedienteId])
+      if (!file) return sendJson(response,404,{error:'No se encontró el expediente.'})
+      if (['cerrado','entregado','no_procede'].includes(file.estado)) return sendJson(response,409,{error:'El expediente está cerrado.'})
+      const body=await readJson(request)
+      if (!['aceptado','rechazado'].includes(body.estado_revision)) return sendJson(response,400,{error:'Selecciona aceptado o rechazado.'})
+      const motivo=optionalText(body,'motivo',1000)
+      if(body.estado_revision==='rechazado'&&!motivo)return sendJson(response,400,{error:'Indica el motivo del rechazo.'})
+      const {rows:[row]}=await pool.query(`UPDATE public.datos_catastrales_expediente SET estado_revision=$3,motivo_revision=$4,revisado_por=$5,revisado_en=now() WHERE expediente_id=$1 AND predio_id=$2 RETURNING *`,[expedienteId,predioId,body.estado_revision,motivo,user.id])
+      return row?sendJson(response,200,{datos:row}):sendJson(response,404,{error:'Aún no se han capturado datos catastrales.'})
+    }
+    return sendJson(response,405,{error:'Método no permitido.'})
+  } catch(error) {
+    if(error.status)return sendJson(response,error.status,{error:error.message})
+    console.error('No se pudieron consultar datos catastrales:',error.code||error.message)
+    return sendJson(response,503,{error:'Aplica la migración de datos catastrales del expediente.'})
+  }
+}
+
 async function getFundosPredio(url, response) {
   const organizationId = url.searchParams.get("organizacion_id")?.trim()
   const fundosId = url.searchParams.get("id_fundos")?.trim()
@@ -1010,39 +1210,16 @@ async function currentLocalUser(request) {
   return rows[0] || null
 }
 
-const roleModules = {
-  ventanilla: ["inicio", "tramites", "lotes_predios", "propietarios", "municipios_fundos"],
-  caja: ["pagos_servicios"],
-  finanzas: ["pagos_servicios"],
-  topografia: ["lotes_predios"],
-  cartografia: ["inicio", "tramites", "lotes_predios", "municipios_fundos"],
-  titulacion: ["inicio", "tramites", "lotes_predios", "titulos_formatos"],
-  viewer: ["inicio", "tramites", "lotes_predios", "historico_reportes"],
-  direccion: ["inicio", "tramites", "historico_reportes"],
-  jefatura: ["inicio", "tramites", "historico_reportes"],
-  legal: ["inicio", "tramites"],
-  digitalizacion: ["inicio", "tramites"],
-  captura: ["inicio", "tramites", "lotes_predios", "propietarios"],
-  informatica: ["inicio", "lotes_predios"],
-}
-
-function localPermissions(role) {
-  return {
-    modulos: role === "admin" ? ["*"] : roleModules[role] || [],
-    altaPredio: ["admin", "cartografia", "captura"].includes(role),
-    altaExpediente: ["admin", "ventanilla", "captura"].includes(role),
-    dictamen: role === "legal",
-    pagos: ["admin", "caja"].includes(role),
-    campo: ["admin", "cartografia", "topografia"].includes(role),
-    medicion: ["admin", "ventanilla", "cartografia", "topografia"].includes(role),
-    archivos: ["admin", "cartografia", "topografia"].includes(role),
-    evidenciaVisita: role === "topografia",
-    plano: ["admin", "cartografia"].includes(role),
-  }
-}
-
 function routePermission(path, method, permissions) {
+  if (/^\/api\/predios\/\d+\/geometria$/.test(path) && method !== 'GET') return permissions.geometria
   const has = key => permissions.modulos.includes("*") || permissions.modulos.includes(key)
+  if (path === "/api/requisitos-documentales") return method === "GET" || method === "POST" && permissions.modulos.includes("*")
+  const docs = path.match(/^\/api\/expedientes\/\d+\/documentos(?:\/[0-9a-f-]{36}(?:\/revision)?)?$/i)
+  if (docs) {
+    if (method === "GET") return has("tramites")
+    return method === "POST" ? permissions.documentacion : method === "PATCH" && permissions.revisionDocumentos
+  }
+  if (/^\/api\/expedientes\/\d+\/predios\/\d+\/catastro$/.test(path)) return method === "GET" ? permissions.lecturaCatastro : ["PUT", "PATCH"].includes(method) && permissions.catastro
   if (/^\/api\/expedientes\/\d+\/dictamen$/.test(path)) return method === "POST" && permissions.dictamen
   const attachment = path.match(/^\/api\/expedientes\/\d+\/predios\/\d+\/(archivos(?:\/[0-9a-f-]{36})?|evidencia-visita|plano)$/i)
   if (attachment) {
@@ -1125,79 +1302,7 @@ async function localSession(request, response, path) {
   }
 }
 
-const adminRoles = new Set([
-  "admin", "ventanilla", "direccion", "jefatura", "legal", "caja", "finanzas",
-  "digitalizacion", "captura", "titulacion", "informatica", "viewer", "topografia", "cartografia",
-])
-
-async function manageLocalUsers(request, response, id) {
-  const secret = process.env.SIGEP_ADMIN_KEY
-  if (!secret || secret.length < 32) {
-    return sendJson(response, 503, { error: "Configura una clave administrativa de al menos 32 caracteres en el servidor." })
-  }
-  const hash = value => createHash("sha256").update(value).digest()
-  if (!timingSafeEqual(hash(request.headers.authorization || ""), hash(`Bearer ${secret}`))) {
-    return sendJson(response, 401, { error: "Clave administrativa incorrecta." })
-  }
-
-  try {
-    if (!id && request.method === "GET") {
-      const { rows } = await pool.query(
-        "SELECT id, nombre, correo, rol, activo FROM public.usuarios_locales ORDER BY nombre, id",
-      )
-      return sendJson(response, 200, { usuarios: rows })
-    }
-    if ((!id && request.method !== "POST") || (id && request.method !== "PATCH")) {
-      return sendJson(response, 405, { error: "Método no permitido." })
-    }
-    const body = await readJson(request)
-    if (!body || typeof body !== "object" || Array.isArray(body) || !adminRoles.has(body.rol)) {
-      return sendJson(response, 400, { error: "Selecciona un rol válido." })
-    }
-    const password = body.password
-    if (password !== undefined && password !== "" &&
-      (typeof password !== "string" || password.length < 12 || password.length > 128)) {
-      return sendJson(response, 400, { error: "Usa una contraseña de 12 a 128 caracteres." })
-    }
-    const hashed = password ? await passwordHash(password) : null
-    if (id) {
-      if (typeof body.activo !== "boolean") {
-        return sendJson(response, 400, { error: "Indica si el perfil está activo." })
-      }
-      const result = await pool.query(
-        `WITH changed AS (
-           UPDATE public.usuarios_locales SET rol = $2, activo = $3,
-             password_hash = coalesce($4, password_hash) WHERE id = $1 RETURNING id
-         ), revoked AS (
-           DELETE FROM public.sesiones_locales WHERE usuario_id IN (SELECT id FROM changed)
-             AND (NOT $3 OR $4 IS NOT NULL)
-         ) SELECT id FROM changed`,
-        [id, body.rol, body.activo, hashed],
-      )
-      return result.rowCount
-        ? sendJson(response, 200, { id })
-        : sendJson(response, 404, { error: "El perfil no existe." })
-    }
-    const name = optionalText(body, "nombre", 160)
-    const email = optionalText(body, "correo", 254)?.toLowerCase()
-    if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return sendJson(response, 400, { error: "Indica un nombre y un correo válidos." })
-    }
-    const { rows } = await pool.query(
-      "INSERT INTO public.usuarios_locales (nombre, correo, rol, password_hash) VALUES ($1, $2, $3, $4) RETURNING id",
-      [name, email, body.rol, hashed],
-    )
-    return sendJson(response, 201, rows[0])
-  } catch (error) {
-    if (error.status) return sendJson(response, error.status, { error: error.message })
-    if (error.code === "23505") return sendJson(response, 409, { error: "Ya existe un perfil con ese correo." })
-    if (["42P01", "42501"].includes(error.code)) {
-      return sendJson(response, 503, { error: "Aplica el SQL de usuarios locales en SIGEP." })
-    }
-    console.error("Error en administración local:", error.code)
-    return sendJson(response, 500, { error: "No fue posible procesar el perfil." })
-  }
-}
+const manageLocalUsers = createUserManager({ pool, currentLocalUser, readJson, sendJson, passwordHash })
 const catalogQueries = {
   propietarios: `SELECT id, nombre_completo AS titulo,
     jsonb_build_object('Nombre', nombre_completo) AS datos, creado_en, actualizado_en
@@ -1338,6 +1443,28 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET") return listOrDownloadAttachments(response, attachmentsMatch[1], attachmentsMatch[2], attachmentsMatch[3], user)
     return sendJson(response, 405, { error: "Método no permitido." })
   }
+
+  const documentsMatch = url.pathname.match(/^\/api\/expedientes\/(\d+)\/documentos(?:\/([0-9a-f-]{36})(\/revision)?)?$/i)
+  if (documentsMatch) {
+    if (request.method === 'GET' && !documentsMatch[3]) return expedienteDocuments(request, response, documentsMatch[1], documentsMatch[2], user, url)
+    if (request.method === 'POST' && !documentsMatch[2]) return expedienteDocuments(request, response, documentsMatch[1], null, user, url)
+    if (request.method === 'PATCH' && documentsMatch[2] && documentsMatch[3]) return expedienteDocuments(request, response, documentsMatch[1], documentsMatch[2], user, url)
+    return sendJson(response, 405, { error: 'Método no permitido.' })
+  }
+
+  if (url.pathname === '/api/requisitos-documentales') {
+    if (request.method === 'POST') return configureDocumentRequirements(request, response, user)
+    if (request.method === 'GET') {
+      try {
+        const { rows } = await pool.query('SELECT tipo_tramite,nombre FROM public.requisitos_documentales WHERE activo ORDER BY tipo_tramite,nombre')
+        return sendJson(response,200,{requisitos:rows})
+      } catch(error) { return sendJson(response,503,{error:'Aplica la migración de listas de requisitos.'}) }
+    }
+    return sendJson(response,405,{error:'Método no permitido.'})
+  }
+
+  const catastroMatch = url.pathname.match(/^\/api\/expedientes\/(\d+)\/predios\/(\d+)\/catastro$/)
+  if (catastroMatch) return expedienteCatastro(request, response, catastroMatch[1], catastroMatch[2], user)
 
   const uploadMatch = url.pathname.match(/^\/api\/expedientes\/(\d+)\/predios\/(\d+)\/(evidencia-visita|plano)$/)
   if (uploadMatch) {

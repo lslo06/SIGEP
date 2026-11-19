@@ -14,7 +14,7 @@ export const routes = [
 ]
 
 export function allowedRoute(route, role) {
-  return Boolean(route && route.key !== 'campo' && roles[role] && canModule(role, route.key))
+  return Boolean(route && canModule(role, route.key))
 }
 
 export function findRoute(hash) {
