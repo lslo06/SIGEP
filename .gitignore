@@ -5,3 +5,4 @@ dist/
 !.env.example
 .sgfl-test-tools/
 api/private-files/
+/README.md
