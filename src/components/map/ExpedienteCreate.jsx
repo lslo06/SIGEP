@@ -3,6 +3,7 @@ import { AlertCircle, BriefcaseBusiness, Check, LoaderCircle, X } from "lucide-r
 
 const types = [
   ["titulacion", "Titulación de fundo legal"],
+  ["busqueda_informacion", "Búsqueda de información"],
   ["certificacion_antecedentes_titulo", "Certificación de antecedentes de título"],
   ["certificacion_copia_titulo", "Certificación de copia de título"],
   ["constancia_datos_lote", "Constancia de antecedentes o datos de lote"],
