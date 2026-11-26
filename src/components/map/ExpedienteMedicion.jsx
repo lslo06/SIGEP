@@ -9,7 +9,7 @@ const labels = {
   visitado: "Visita registrada",
 }
 
-export default function ExpedienteMedicion({ expedienteId, predioId, folio, predio, closed, role, topografos = [], onSaved, apiBase = "/api" }) {
+export default function ExpedienteMedicion({ expedienteId, predioId, folio, predio, superficieRegistrada = predio?.superficie, closed, role, topografos, onSaved, apiBase = "/api" }) {
   const [record, setRecord] = useState(null)
   const [ready, setReady] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -111,10 +111,14 @@ export default function ExpedienteMedicion({ expedienteId, predioId, folio, pred
   }
 
   const canRequest = !record && ['admin', 'ventanilla'].includes(role)
-  const canAssign = ['solicitado', 'asignado'].includes(record?.estado) && ['admin', 'cartografia'].includes(role) && topografos.length > 0
+  const canAssign = ['solicitado', 'asignado'].includes(record?.estado) && ['admin', 'cartografia'].includes(role) && topografos?.length > 0
   const canVisit = record?.estado === 'asignado' && role === 'topografia'
   const canUploadEvidence = !closed && record?.estado === 'visitado' && role === 'topografia'
   const canUploadPlan = !closed && ['medido', 'visitado'].includes(record?.estado) && ['admin', 'cartografia'].includes(role)
+  const registeredArea = superficieRegistrada == null || superficieRegistrada === '' ? null : Number(superficieRegistrada)
+  const measuredArea = record?.superficie_m2 == null || record.superficie_m2 === '' ? null : Number(record.superficie_m2)
+  const hasRegisteredArea = registeredArea !== null && Number.isFinite(registeredArea)
+  const hasMeasuredArea = measuredArea !== null && Number.isFinite(measuredArea)
 
   return <details className="expediente-medicion">
     <summary>Medición y visita de campo</summary>
@@ -123,6 +127,13 @@ export default function ExpedienteMedicion({ expedienteId, predioId, folio, pred
     {ready && <p>Estado: <strong>{labels[record?.estado] || "Por confirmar"}</strong></p>}
     {record?.responsable && <p>Responsable: {record.responsable} · Compromiso: {record.fecha_compromiso?.slice(0, 10)}</p>}
     {record?.fecha_visita && <p>Visita: {record.fecha_visita.slice(0, 10)} · {record.superficie_m2} m² · {record.observaciones} · Evidencia: {record.referencia_evidencia}</p>}
+    {hasRegisteredArea && <section aria-label="Comparación de superficies">
+      <p>Superficie registrada del predio: <strong>{registeredArea.toFixed(2)} m²</strong></p>
+      {hasMeasuredArea && <p>Superficie medida: <strong>{measuredArea.toFixed(2)} m²</strong> · Diferencia (medida − registrada): <strong>{(measuredArea - registeredArea).toFixed(2)} m²</strong></p>}
+      <p>Compara el levantamiento con el dato del predio. Esta comparación no confirma ni modifica la superficie; describe cualquier diferencia en las observaciones.</p>
+    </section>}
+    {ready && !closed && role === 'topografia' && record?.estado === 'asignado' && <p>Primero registra la visita. Al guardarla se habilita el formulario para adjuntar evidencia.</p>}
+    {ready && !closed && ['admin', 'cartografia'].includes(role) && ['solicitado', 'asignado'].includes(record?.estado) && topografos?.length === 0 && <p>No hay topógrafos activos disponibles para asignar. Solicita a Administración que revise las cuentas.</p>}
     {ready && !closed && (canRequest || canAssign || canVisit) && <form onSubmit={save}>
       <fieldset disabled={saving}>
         {canRequest && <>
@@ -136,9 +147,9 @@ export default function ExpedienteMedicion({ expedienteId, predioId, folio, pred
         </>}
         {canVisit && <>
           <label className="form-field">Fecha de visita<input name="fecha_visita" type="date" required /></label>
-          <label className="form-field">Superficie medida (m²)<input name="superficie_m2" type="number" min="0.01" step="0.01" required /></label>
-          <label className="form-field">Observaciones<textarea name="observaciones" maxLength={2000} required /></label>
-          <label className="form-field">Referencia de evidencia<input name="referencia_evidencia" maxLength={500} required /></label>
+          <label className="form-field">Superficie medida (m²)<input name="superficie_m2" type="number" min="0.01" step="0.01" placeholder="Ej. 120.50" required /></label>
+          <label className="form-field">Observaciones<textarea name="observaciones" maxLength={2000} placeholder="Resultado del levantamiento, diferencias e incidencias de la visita." required /></label>
+          <label className="form-field">Referencia de evidencia<input name="referencia_evidencia" maxLength={500} placeholder="Ej. Informe de visita y fotografías del levantamiento" required /><small>Es una descripción. Los archivos se adjuntan después de registrar la visita.</small></label>
           <button className="primary-action" type="submit" value="visitado">Registrar visita</button>
         </>}
       </fieldset>

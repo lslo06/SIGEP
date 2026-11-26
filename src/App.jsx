@@ -14,6 +14,7 @@ import { firmName, productName } from './lib/brand.js'
 const MapWorkspace = lazy(() => import('./modules/MapWorkspace'))
 const FieldWorkspace = lazy(() => import('./modules/FieldWorkspace'))
 const ExpedienteSearch = lazy(() => import('./components/map/ExpedienteSearch'))
+const SolicitudTituloCreate = lazy(() => import('./components/initial-reception/SolicitudTituloCreate'))
 
 const emptyFile = {
   tipo: 'Titulación', propietario: '', fundo: '', manzana: '', lote: '',
@@ -72,6 +73,8 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
   const [activeTab, setActiveTab] = useState('Mi bandeja')
   const [search, setSearch] = useState('')
   const [dialog, setDialog] = useState(null)
+  const [newTitle, setNewTitle] = useState(false)
+  const [createdId, setCreatedId] = useState(null)
   const [mobileMenu, setMobileMenu] = useState(false)
   const [notice, setNotice] = useState('')
   const inboxRef = useRef(null)
@@ -174,15 +177,17 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
             : activeNav === 'Pagos y servicios' ? <PaymentsWorkspace role={role} canRegister={permissions?.pagos} />
               : activeNav === 'Seguimiento de trámites'
                 ? <section className="sgfl-workspace local-shell">
-                    <header><h1>Seguimiento de trámites</h1><p>Consulta los expedientes, sus predios y movimientos.</p></header>
-                    <Suspense fallback={<p role="status">Cargando expedientes…</p>}><ExpedienteSearch apiBase="/api/sigep" canMeasure={permissions.medicion} role={role} /></Suspense>
+                    <header><h1>Seguimiento de trámites</h1><p>Recibe solicitudes y consulta sus expedientes y movimientos.</p>
+                      {permissions.altaExpediente && <button className="primary-button" onClick={() => setNewTitle(true)}><Plus size={17} /> Nueva solicitud de título</button>}
+                    </header>
+                    <Suspense fallback={<p role="status">Cargando expedientes…</p>}><ExpedienteSearch apiBase="/api/sigep" canMeasure={permissions.medicion} role={role} initialId={createdId} /></Suspense>
                   </section>
                 : activeNav ? <ModuleWorkspace moduleName={activeNav} organization={organization} />
                     : <p>Este apartado no está disponible.</p>}
         </div> : <div className="content">
           <section className="welcome-row">
             <div><div className="eyebrow date-label">{new Intl.DateTimeFormat('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()).toLocaleUpperCase('es-MX')}</div><h1>Buenos días, {user.user_metadata?.nombre || user.email?.split('@')[0]}</h1><p>Tienes <strong className="orange-text">{files.filter((file) => ['Hoy', '1 día'].includes(file.espera)).length} tareas pendientes</strong> en {organization.nombre}.</p></div>
-            {permissions.altaExpediente && <button className="primary-button" onClick={() => setActiveNav('Lotes y predios')}><Plus size={17} /> Nuevo trámite</button>}
+            {permissions.altaExpediente && <button className="primary-button" onClick={() => setNewTitle(true)}><Plus size={17} /> Nueva solicitud de título</button>}
           </section>
 
           <section className="priority-banner">
@@ -218,6 +223,9 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
 
       {notice && <div className="toast"><Check size={17} />{notice}</div>}
       {dialog?.type === 'details' && <DetailsDialog file={dialog.file} onClose={() => setDialog(null)} />}
+      {newTitle && <Suspense fallback={<p role="status">Abriendo recepción…</p>}><SolicitudTituloCreate onClose={() => setNewTitle(false)} onCreated={file => {
+        setNewTitle(false); setCreatedId(file.id); setActiveNav('Seguimiento de trámites'); refreshFiles()
+      }} /></Suspense>}
     </div>
   )
 }

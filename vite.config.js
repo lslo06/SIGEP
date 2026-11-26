@@ -8,6 +8,19 @@ export default defineConfig({
   server: {
     host: 'localhost',
     proxy: {
+      '^/api/sigep/solicitudes-titulacion(?:/\\d+(?:/visita|/evidencia|/archivos/[0-9a-fA-F-]{36})?)?(?:\\?|$)': {
+        target: 'http://127.0.0.1:8100',
+        rewrite: path => path.replace('/api/sigep/', '/api/'),
+        bypass(request) {
+          if (request.method === 'GET') return undefined
+          const sameOrigin = request.headers.origin === `http://${request.headers.host}`
+          if (request.method !== 'POST' || !sameOrigin) return false
+          const type = request.headers['content-type']?.split(';')[0]
+          if (type === 'application/json' && /^\/api\/sigep\/solicitudes-titulacion(?:\/\d+\/visita)?$/.test(request.url || '')) return undefined
+          if (type === 'multipart/form-data' && /^\/api\/sigep\/solicitudes-titulacion\/\d+\/evidencia$/.test(request.url || '')) return undefined
+          return false
+        },
+      },
       '^/api/sigep/(?:predios(?:/mapa|/[0-9]+/(?:geometria|historial-geometria))?|fundos/predio|pagos|campo|sesion(?:/entrar|/salir)?|admin/usuarios(?:/[0-9a-fA-F-]+)?|modulos/[a-z_]+|requisitos-documentales|expedientes(?:/\\d+(?:/dictamen|/documentos(?:/[0-9a-fA-F-]{36}(?:/revision)?)?|/predios/\\d+/(?:medicion|catastro|archivos(?:/[0-9a-fA-F-]{36})?|evidencia-visita|plano))?)?)(?:\\?|$)': {
         target: 'http://127.0.0.1:8100',
         rewrite: path => path.replace('/api/sigep/', '/api/'),

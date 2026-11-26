@@ -22,6 +22,14 @@ export const roleModules = {
 }
 export const documentReaders = ['admin', 'ventanilla', 'direccion', 'jefatura', 'legal',
   'digitalizacion', 'captura', 'titulacion', 'informatica', 'viewer', 'cartografia', 'topografia']
+// Reception orders are independent of a definitive parcel. Both UI and API use this map.
+export const initialVisitTransitions = {
+  solicitar: { from: null, to: 'revision_direccion', roles: ['ventanilla', 'admin'], area: 'Dirección', label: 'Solicitar medición' },
+  enviar_fundos: { from: 'revision_direccion', to: 'revision_jefatura', roles: ['direccion', 'admin'], area: 'Jefatura de Fundos Legales', label: 'Canalizar a Fundos Legales' },
+  enviar_cartografia: { from: 'revision_jefatura', to: 'solicitado', roles: ['jefatura', 'admin'], area: 'Cartografía y Valuación', label: 'Canalizar a Cartografía' },
+  asignar: { from: 'solicitado', to: 'asignado', roles: ['cartografia', 'admin'], area: 'Topografía', label: 'Asignar visita' },
+  registrar_visita: { from: 'asignado', to: 'visitado', roles: ['topografia'], area: 'Cartografía y Valuación', label: 'Registrar visita' },
+}
 export function localPermissions(role) {
   return {
     modulos: Object.hasOwn(roleModules, role) ? roleModules[role] : [],

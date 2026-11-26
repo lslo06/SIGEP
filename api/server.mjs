@@ -1,5 +1,6 @@
 import { localPermissions } from './permissions.mjs'
 import { createUserManager } from './users.mjs'
+import { createInitialReception } from './initial-reception.mjs'
 import { promisify } from 'node:util'
 import { createHash, timingSafeEqual, randomBytes, randomUUID, scrypt as scryptCallback } from 'node:crypto'
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
@@ -518,7 +519,8 @@ async function getExpediente(id, response) {
     const { rows } = await pool.query(
       `SELECT e.id, e.folio, e.tipo_tramite, e.fecha_recepcion, e.estado,
          e.etapa_actual, e.area_responsable, e.observaciones, e.created_at,
-         s.nombre AS solicitante, s.representante_nombre
+         s.nombre AS solicitante, s.representante_nombre,
+         COALESCE((to_jsonb(e)->>'recepcion_inicial')::boolean, false) AS recepcion_inicial
        FROM public.expedientes e
        JOIN public.solicitantes s ON s.id = e.solicitante_id
        WHERE e.id = $1`,
@@ -1211,6 +1213,13 @@ async function currentLocalUser(request) {
 }
 
 function routePermission(path, method, permissions) {
+  if (/^\/api\/solicitudes-titulacion(?:\/\d+(?:\/visita|\/evidencia|\/archivos\/[0-9a-f-]{36})?)?$/i.test(path)) {
+    if (method === 'GET') return permissions.archivos
+    if (method !== 'POST') return false
+    if (path === '/api/solicitudes-titulacion') return permissions.altaExpediente
+    if (path.endsWith('/evidencia')) return permissions.evidenciaVisita
+    return path.endsWith('/visita') && permissions.archivos // Handler verifies role and workflow stage.
+  }
   if (/^\/api\/predios\/\d+\/geometria$/.test(path) && method !== 'GET') return permissions.geometria
   const has = key => permissions.modulos.includes("*") || permissions.modulos.includes(key)
   if (path === "/api/requisitos-documentales") return method === "GET" || method === "POST" && permissions.modulos.includes("*")
@@ -1273,7 +1282,9 @@ async function localSession(request, response, path) {
     const body = await readJson(request)
     const email = optionalText(body || {}, "correo", 254)?.toLowerCase()
     const password = body?.password
-    if (typeof password !== "string" || password.length < 12 || password.length > 128 || !email) {
+    // Login verifies the stored hash; creation policy belongs to user management.
+    // This also permits explicitly provisioned demonstration accounts.
+    if (typeof password !== "string" || password.length < 1 || password.length > 128 || !email) {
       return sendJson(response, 401, { error: "Correo o contraseña incorrectos." })
     }
     const { rows: [user] } = await pool.query(
@@ -1303,6 +1314,8 @@ async function localSession(request, response, path) {
 }
 
 const manageLocalUsers = createUserManager({ pool, currentLocalUser, readJson, sendJson, passwordHash })
+const initialReception = createInitialReception({ pool, readJson, sendJson, optionalText, optionalNumber,
+  isValidIsoDate, privateStorageDirectory })
 const catalogQueries = {
   propietarios: `SELECT id, nombre_completo AS titulo,
     jsonb_build_object('Nombre', nombre_completo) AS datos, creado_en, actualizado_en
@@ -1386,11 +1399,16 @@ const server = http.createServer(async (request, response) => {
     return sendJson(response, 503, { error: "El acceso local no está disponible." })
   }
 
+  const initialMatch = url.pathname.match(/^\/api\/solicitudes-titulacion(?:\/(\d+)(?:\/(visita|evidencia|archivos)(?:\/([0-9a-f-]{36}))?)?)?$/i)
+  if (initialMatch) return initialReception(request, response, user, {
+    id: initialMatch[1], action: initialMatch[2], fileId: initialMatch[3],
+  })
+
   if (url.pathname === "/api/campo") {
     try {
       const { rows: mediciones } = await pool.query(
         `SELECT m.expediente_id, m.predio_id, m.estado, m.fecha_compromiso,
-           e.folio, p.clave_catastral
+           e.folio, p.clave_catastral, p.superficie
          FROM public.mediciones_expediente m
          JOIN public.expedientes e ON e.id = m.expediente_id
          JOIN public.predios p ON p.id = m.predio_id

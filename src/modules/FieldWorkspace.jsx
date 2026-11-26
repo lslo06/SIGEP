@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import ExpedienteMedicion from '../components/map/ExpedienteMedicion'
+import { InitialReceptionQueue } from '../components/initial-reception/InitialReception'
 
 export default function FieldWorkspace({ role }) {
   const [queue, setQueue] = useState(null)
@@ -28,6 +29,8 @@ export default function FieldWorkspace({ role }) {
 
   return <section className="sgfl-workspace local-shell">
     <header><h1>Medición y topografía</h1><p>{role === 'topografia' ? 'Visitas asignadas a tu cuenta.' : 'Solicitudes de medición y asignaciones de campo.'}</p></header>
+    <InitialReceptionQueue role={role} />
+    <h2>Mediciones de predios vinculados</h2>
     {error && <p role="alert">{error}</p>}
     {!error && !queue && <p role="status">Cargando solicitudes…</p>}
     {queue?.mediciones.length === 0 && <p>Sin solicitudes para mostrar.</p>}
@@ -39,6 +42,7 @@ export default function FieldWorkspace({ role }) {
         </button>
         <p>{item.estado}{item.fecha_compromiso && ' · Compromiso ' + item.fecha_compromiso.slice(0, 10)}</p>
         {selected === key && <ExpedienteMedicion expedienteId={item.expediente_id} predioId={item.predio_id}
+          folio={item.folio} superficieRegistrada={item.superficie}
           role={role} topografos={queue.topografos} apiBase="/api/sigep" onSaved={() => setRevision(value => value + 1)} />}
       </article>
     })}

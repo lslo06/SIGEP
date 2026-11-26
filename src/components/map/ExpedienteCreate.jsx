@@ -71,7 +71,7 @@ export default function ExpedienteCreate({ predioFeature, onClose, onCreated, ap
         <header className="create-dialog-header">
           <span className="create-dialog-icon"><BriefcaseBusiness size={19} /></span>
           <div className="create-dialog-heading">
-            <span>ALTA DE EXPEDIENTE · DATOS DE PRUEBA</span>
+            <span>ALTA DE EXPEDIENTE</span>
             <h2 id="create-expediente-title">Iniciar trámite</h2>
           </div>
           <button className="dialog-close" type="button" aria-label="Cerrar" disabled={saving} onClick={onClose}><X size={19} /></button>
@@ -94,16 +94,16 @@ export default function ExpedienteCreate({ predioFeature, onClose, onCreated, ap
                   {types.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
-              <label className="form-field full-field"><span>Nombre del solicitante <b>*</b></span><input required maxLength={200} value={applicant.nombre} onChange={(event) => updateApplicant("nombre", event.target.value)} autoComplete="name" /></label>
-              <label className="form-field"><span>Identificación</span><input maxLength={100} value={applicant.identificacion} onChange={(event) => updateApplicant("identificacion", event.target.value)} /></label>
-              <label className="form-field"><span>Teléfono</span><input type="tel" maxLength={50} value={applicant.telefono} onChange={(event) => updateApplicant("telefono", event.target.value)} autoComplete="tel" /></label>
-              <label className="form-field full-field"><span>Correo</span><input type="email" maxLength={254} value={applicant.correo} onChange={(event) => updateApplicant("correo", event.target.value)} autoComplete="email" /></label>
-              <label className="form-field full-field"><span>Domicilio para notificaciones</span><input maxLength={500} value={applicant.domicilio_notificacion} onChange={(event) => updateApplicant("domicilio_notificacion", event.target.value)} autoComplete="street-address" /></label>
-              <label className="form-field full-field"><span>Representante legal, si aplica</span><input maxLength={200} value={applicant.representante_nombre} onChange={(event) => updateApplicant("representante_nombre", event.target.value)} /></label>
-              {applicant.representante_nombre && <label className="form-field full-field"><span>Identificación del representante</span><input maxLength={100} value={applicant.representante_identificacion} onChange={(event) => updateApplicant("representante_identificacion", event.target.value)} /></label>}
-              <label className="form-field full-field"><span>Observación inicial</span><textarea rows={3} maxLength={2000} value={observaciones} onChange={(event) => setObservaciones(event.target.value)} /></label>
+              <label className="form-field full-field"><span>Nombre completo del solicitante <b>*</b></span><input required maxLength={200} placeholder="Ej. María del Carmen López Hernández" value={applicant.nombre} onChange={(event) => updateApplicant("nombre", event.target.value)} autoComplete="name" /><small>Captura nombres y apellidos tal como aparecen en el documento presentado.</small></label>
+              <label className="form-field"><span>Identificación presentada</span><input maxLength={100} placeholder="Ej. INE · referencia del documento" value={applicant.identificacion} onChange={(event) => updateApplicant("identificacion", event.target.value)} /><small>Este dato no sustituye el archivo ni su revisión documental.</small></label>
+              <label className="form-field"><span>Teléfono</span><input type="tel" maxLength={50} placeholder="Ej. 618 123 4567" value={applicant.telefono} onChange={(event) => updateApplicant("telefono", event.target.value)} autoComplete="tel" /></label>
+              <label className="form-field full-field"><span>Correo (opcional)</span><input type="email" maxLength={254} placeholder="Ej. persona@example.com" value={applicant.correo} onChange={(event) => updateApplicant("correo", event.target.value)} autoComplete="email" /></label>
+              <label className="form-field full-field"><span>Domicilio para notificaciones</span><input maxLength={500} placeholder="Calle, número, colonia, localidad y municipio" value={applicant.domicilio_notificacion} onChange={(event) => updateApplicant("domicilio_notificacion", event.target.value)} autoComplete="street-address" /><small>Puede ser distinto de la ubicación del terreno.</small></label>
+              <label className="form-field full-field"><span>Representante legal, si aplica</span><input maxLength={200} placeholder="Nombre completo de quien representa al solicitante" value={applicant.representante_nombre} onChange={(event) => updateApplicant("representante_nombre", event.target.value)} /></label>
+              {applicant.representante_nombre && <label className="form-field full-field"><span>Identificación del representante</span><input maxLength={100} placeholder="Tipo y referencia del documento presentado" value={applicant.representante_identificacion} onChange={(event) => updateApplicant("representante_identificacion", event.target.value)} /></label>}
+              <label className="form-field full-field"><span>Observación inicial</span><textarea rows={3} maxLength={2000} placeholder="Describe el motivo de la solicitud y los pendientes conocidos." value={observaciones} onChange={(event) => setObservaciones(event.target.value)} /></label>
             </div>
-            <p className="expediente-prototype-note">Prototipo: usa datos ficticios. Este formulario aún no aplica inicio de sesión ni permisos por rol.</p>
+            <p className="expediente-prototype-note">Los campos con * son obligatorios para este registro. El alta queda asociada a tu sesión; después podrás integrar los documentos desde Seguimiento de trámites.</p>
             {message && <p className="dialog-error" role="alert"><AlertCircle size={16} />{message}</p>}
             <footer className="dialog-footer">
               <button className="secondary-action" type="button" disabled={saving} onClick={onClose}>Cancelar</button>

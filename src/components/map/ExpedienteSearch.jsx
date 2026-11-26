@@ -2,7 +2,8 @@ import ExpedienteMedicion from "./ExpedienteMedicion"
 import ExpedienteDictamen from "./ExpedienteDictamen"
 import { BorradoresDocumento } from "./ExpedienteBorradores"
 import ExpedienteDocumentacion from "./ExpedienteDocumentacion"
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { InitialReceptionQueue, InitialVisit } from '../initial-reception/InitialReception'
 import { BriefcaseBusiness, CalendarDays, ChevronDown, ChevronUp, Clock3, Search } from "lucide-react"
 
 const initialFilters = { folio: "", solicitante: "", predio: "", estado: "", fecha_desde: "", fecha_hasta: "" }
@@ -26,7 +27,7 @@ function propertyLocation(parcel) {
   return [parcel.municipio, parcel.fundo && `Fundo ${parcel.fundo}`, parcel.manzana && `Mz. ${parcel.manzana}`, parcel.lote && `Lote ${parcel.lote}`].filter(Boolean).join(" · ")
 }
 
-export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false, role }) {
+export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false, role, initialId }) {
   const [filters, setFilters] = useState(initialFilters)
   const [results, setResults] = useState([])
   const [detail, setDetail] = useState(null)
@@ -34,6 +35,7 @@ export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false,
   const [loading, setLoading] = useState(false)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [hasMore, setHasMore] = useState(false)
+  const [intakeRevision, setIntakeRevision] = useState(0)
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -63,7 +65,7 @@ export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false,
     }
   }
 
-  async function openDetail(id) {
+  const openDetail = useCallback(async (id) => {
     setLoadingDetail(true)
     setMessage("")
     try {
@@ -76,7 +78,11 @@ export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false,
     } finally {
       setLoadingDetail(false)
     }
-  }
+  }, [apiBase])
+
+  useEffect(() => {
+    if (initialId) { openDetail(initialId); setIntakeRevision(value => value + 1) }
+  }, [initialId, openDetail])
 
   function updateDictamen({ expediente, movimiento }) {
     setDetail(current => current?.id === expediente.id
@@ -99,6 +105,7 @@ export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false,
 
   return (
     <section className="expediente-search" aria-label="Consultar expedientes">
+      <InitialReceptionQueue apiBase={apiBase} role={role} onOpen={openDetail} revision={intakeRevision} />
       <div className="expediente-search-heading">
         <div>
           <strong><BriefcaseBusiness size={15} /> Consultar expedientes</strong>
@@ -140,6 +147,9 @@ export default function ExpedienteSearch({ apiBase = "/api", canMeasure = false,
           <div><small>FECHA DE RECEPCIÓN</small><strong>{formatDate(detail.fecha_recepcion)}</strong></div>
           <div><small>PREDIOS VINCULADOS</small>{detail.predios?.length ? detail.predios.map((parcel) => <span className="detail-parcel" key={parcel.id}><strong>{parcel.clave_catastral}</strong>{propertyLocation(parcel) && <small>{propertyLocation(parcel)}</small>}</span>) : <span>Sin predios vinculados</span>}</div>
         </div>
+        {detail.recepcion_inicial && <InitialVisit key={detail.id} expedienteId={detail.id} role={role} apiBase={apiBase} onChanged={() => {
+          openDetail(detail.id); setIntakeRevision(value => value + 1)
+        }} />}
         <ExpedienteDictamen key={detail.id} expediente={detail} role={role} apiBase={apiBase} onSaved={updateDictamen} />
         <BorradoresDocumento role={role} expediente={detail} tipo={labels[detail.tipo_tramite] || detail.tipo_tramite} />
         <ExpedienteDocumentacion expediente={detail} role={role} apiBase={apiBase} />

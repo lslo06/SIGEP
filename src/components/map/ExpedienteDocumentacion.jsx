@@ -147,14 +147,21 @@ export default function ExpedienteDocumentacion({ expediente, role, apiBase = '/
       return <section className="expediente-catastro" key={predio.id}>
         <h4>Cédula catastral y propietarios · {predio.clave_catastral}</h4>
         {canCaptureCatastro && !['cerrado', 'entregado', 'no_procede'].includes(expediente.estado) ? <form key={`${predio.id}:${data?.capturado_en || 'nuevo'}`} className="attachment-upload catastro-form" onSubmit={event => saveCatastro(event, predio)}>
-          <label>Folio de cédula<input name="cedula_folio" maxLength="100" defaultValue={data?.cedula_folio || ''} /></label>
+          <label>Folio de cédula<input name="cedula_folio" maxLength="100" placeholder="Folio del documento, si ya existe" defaultValue={data?.cedula_folio || ''} /></label>
           <label>Fecha<input name="cedula_fecha" type="date" defaultValue={data?.cedula_fecha?.slice(0,10) || ''} /></label>
           <label>Valor del terreno<input name="valor_terreno" type="number" min="0" step="0.01" defaultValue={money(data?.valor_terreno)} /></label>
           <label>Valor construcción<input name="valor_construccion" type="number" min="0" step="0.01" defaultValue={money(data?.valor_construccion)} /></label>
           <label>Valor catastral<input name="valor_catastral" type="number" min="0" step="0.01" defaultValue={money(data?.valor_catastral)} /></label>
-          <label className="full-field">Propietarios (uno por línea)<textarea name="propietarios" required defaultValue={(data?.propietarios || []).map(owner => owner.nombre).join('\n')} /></label>
+          <label className="full-field">Propietarios (uno por línea)<textarea name="propietarios" required placeholder="Nombre completo según la documentación revisada" defaultValue={(data?.propietarios || []).map(owner => owner.nombre).join('\n')} /></label>
           <button className="secondary-button" disabled={Boolean(busy)}>{busy === `catastro-${predio.id}` ? 'Guardando…' : 'Guardar cédula y propietarios'}</button>
-        </form> : null}
+        </form> : data ? <dl>
+          <dt>Folio de cédula</dt><dd>{data.cedula_folio || 'Sin capturar'}</dd>
+          <dt>Fecha de cédula</dt><dd>{data.cedula_fecha?.slice(0, 10) || 'Sin capturar'}</dd>
+          <dt>Valor del terreno</dt><dd>{money(data.valor_terreno) || 'Sin capturar'}</dd>
+          <dt>Valor de construcción</dt><dd>{money(data.valor_construccion) || 'Sin capturar'}</dd>
+          <dt>Valor catastral</dt><dd>{money(data.valor_catastral) || 'Sin capturar'}</dd>
+          <dt>Propietarios registrados</dt><dd>{(data.propietarios || []).map(owner => owner.nombre).join('; ') || 'Sin capturar'}</dd>
+        </dl> : <p>Aún no se han capturado la cédula y sus valores.</p>}
         <p>Estado: <strong>{statusNames[data?.estado_revision] || 'Sin captura'}</strong>{data?.motivo_revision ? ` · ${data.motivo_revision}` : ''}</p>
         {canCaptureCatastro && data && !['cerrado', 'entregado', 'no_procede'].includes(expediente.estado) && <div className="document-review"><button type="button" onClick={() => reviewCatastro(predio,'aceptado')}>Aceptar datos</button><button type="button" onClick={() => reviewCatastro(predio,'rechazado')}>Rechazar datos</button></div>}
       </section>

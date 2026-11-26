@@ -1,5 +1,6 @@
 import { localPermissions } from '../api/permissions.mjs'
 import { createUserManager } from '../api/users.mjs'
+import { createInitialReception } from '../api/initial-reception.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -47,7 +48,7 @@ async function invoke(path, body, { fail, missing = false, authenticated = true,
     return query(sql, params)
   }, connect: async () => client }
   vm.runInNewContext(source, {
-    localPermissions, createUserManager, ...crypto, scryptCallback: crypto.scrypt, promisify, URL, Buffer, path: pathModule,
+    localPermissions, createUserManager, createInitialReception, ...crypto, scryptCallback: crypto.scrypt, promisify, URL, Buffer, path: pathModule,
     Pool: function () { return pool },
     http: { createServer(fn) { handler = fn; return { listen() {}, close() {} } } },
     process: { env: {}, on() {} }, console: { log() {}, error() {} },
