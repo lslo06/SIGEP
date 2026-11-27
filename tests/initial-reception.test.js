@@ -27,7 +27,8 @@ const intake = {
 
 function harness() {
   let handler, actor, rollback, active = 0, failure = ''
-  let db = { file: null, person: null, location: null, visit: null, files: [], movements: [] }
+  let db = { file: null, person: null, location: null, visit: null, files: [], movements: [], links: [], measurements: [],
+    parcel: { id: 31, clave_catastral: 'PRUEBA-031', superficie: '151.00', geometria_valida: true } }
   const calls = [], unexpected = [], bytes = new Map()
   const query = async (statement, params = []) => {
     const sql = statement.replace(/\s+/g, ' ').trim()
@@ -48,6 +49,11 @@ function harness() {
     if (sql.startsWith('INSERT INTO public.movimientos_expediente')) { db.movements.push([...params]); return rows([]) }
     if (sql.includes('FROM public.expedientes WHERE id=$1') && sql.endsWith('FOR UPDATE')) return rows(db.file ? [db.file] : [])
     if (sql.includes('FROM public.visitas_iniciales WHERE expediente_id=$1')) return rows(db.visit ? [db.visit] : [])
+    if (sql.startsWith('INSERT INTO public.mediciones_expediente')) { db.measurements.push([...params]); return rows([]) }
+    if (sql.startsWith('SELECT predio_id FROM public.expediente_predios')) return rows(db.links)
+    if (sql.startsWith('INSERT INTO public.expediente_predios')) { db.links.push({ expediente_id: params[0], predio_id: params[1] }); return rows([]) }
+    if (sql.includes('FROM public.expediente_predios ep JOIN public.predios')) return rows(db.links.length ? [db.parcel] : [])
+    if (sql.includes('FROM public.predios WHERE id=$1 FOR UPDATE')) return rows(db.parcel?.id === params[0] ? [db.parcel] : [])
     if (sql.includes('FROM public.usuarios_locales')) return rows(sql.includes('WHERE id=$1') && params[0] !== topoId ? [] : [{ id: topoId, nombre: 'Topógrafo de prueba' }])
     if (sql.startsWith('INSERT INTO public.visitas_iniciales')) {
       if (['asignado', 'visitado'].includes(params[1])) {
@@ -128,7 +134,86 @@ test('Reception saves separated names and location without parcel, cadastral key
   assert.equal(h.calls.at(-1).sql, 'COMMIT')
 })
 
+test('Ventanilla can list initial requests and read location details without parcel-editing permissions', async () => {
+  const h = harness()
+  assert.equal((await h.request('ventanilla', base, intake)).status, 201)
+  const beforeRead = h.calls.length
+  const list = await h.request('ventanilla')
+  assert.equal(list.status, 200)
+  assert.equal(list.body.solicitudes[0].folio, 'FL-2026-000012')
+  const detail = await h.request('ventanilla', `${base}/12`)
+  assert.equal(detail.status, 200)
+  assert.equal(detail.body.solicitud.referencias, intake.ubicacion.referencias)
+  assert.ok(h.calls.slice(beforeRead).every(({ sql }) => sql.startsWith('SELECT')))
+  assert.equal(localPermissions('ventanilla').altaPredio, false)
+  assert.equal(localPermissions('ventanilla').geometria, false)
+  assert.equal(localPermissions('ventanilla').catastro, false)
+})
+
+async function reachVisitedWithEvidence(h) {
+  await reachAssigned(h)
+  assert.equal((await h.request('topografia', `${base}/12/visita`, visit)).status, 200)
+  assert.equal((await h.request('topografia', `${base}/12/evidencia`, pdf, { multipart: true })).status, 201)
+}
+
+test('Cartography links the measured parcel to the SAME case, preserves visit/evidence/areas and enables the existing parcel circuit', async () => {
+  const h = harness(); await reachVisitedWithEvidence(h)
+  const evidenceId = h.db.files[0].id
+  const result = await h.request('cartografia', `${base}/12/predio`, { predio_id: 31, observaciones: 'Identificado con visita y evidencia; diferencia de 0.75 m² pendiente de conciliación.' })
+  assert.equal(result.status, 200)
+  assert.equal(h.db.file.folio, 'FL-2026-000012')
+  assert.equal(h.db.file.etapa_actual, 'integracion_cartografica')
+  assert.deepEqual(h.db.links, [{ expediente_id: '12', predio_id: 31 }])
+  assert.equal(h.db.measurements[0][2], topoId)
+  assert.equal(h.db.measurements[0][5], 150.25)
+  assert.equal(h.db.parcel.superficie, '151.00')
+  assert.equal(h.db.movements.at(-1).at(-1), 'cartografia@example.test')
+  const detail = await h.request('ventanilla', `${base}/12`)
+  assert.equal(detail.body.predios[0].id, 31)
+  assert.equal((await h.request('ventanilla', `${base}/12/archivos/${evidenceId}`)).status, 200)
+  assert.equal((await h.request('cartografia', `${base}/12/predio`, { predio_id: 31, observaciones: 'Repetir' })).status, 409)
+  assert.equal(h.db.measurements.length, 1)
+})
+
+test('Parcel linking rejects wrong roles, skipped visits, missing evidence, missing/invalid geometry and malformed IDs', async () => {
+  const h = harness(); await reachAssigned(h)
+  const body = { predio_id: 31, observaciones: 'Comprobado en Cartografía' }
+  for (const role of Object.keys(roles).filter(role => !['admin', 'cartografia'].includes(role))) {
+    assert.equal((await h.request(role, `${base}/12/predio`, body)).status, 403, role)
+  }
+  assert.equal((await h.request('cartografia', `${base}/12/predio`, body)).status, 409)
+  await h.request('topografia', `${base}/12/visita`, visit)
+  assert.equal((await h.request('cartografia', `${base}/12/predio`, body)).status, 409)
+  await h.request('topografia', `${base}/12/evidencia`, pdf, { multipart: true })
+  for (const predio_id of [null, true, [], {}, -1, 1.5, 0, '', 'abc']) {
+    assert.equal((await h.request('cartografia', `${base}/12/predio`, { ...body, predio_id })).status, 400)
+  }
+  assert.equal((await h.request('cartografia', `${base}/12/predio`, { ...body, observaciones: '' })).status, 400)
+  assert.equal((await h.request('cartografia', `${base}/12/predio`, { ...body, predio_id: 999 })).status, 404)
+  h.db.parcel.geometria_valida = false
+  assert.equal((await h.request('cartografia', `${base}/12/predio`, body)).status, 409)
+  assert.equal(h.db.links.length, 0)
+})
+
+test('Linking failures roll back parcel association, copied measurement and stage; closed cases reject linking', async () => {
+  for (const statement of ['INSERT INTO public.expediente_predios', 'INSERT INTO public.mediciones_expediente', 'UPDATE public.expedientes', 'INSERT INTO public.movimientos_expediente']) {
+    const h = harness(); await reachVisitedWithEvidence(h)
+    const before = structuredClone(h.db)
+    h.fail(statement)
+    assert.equal((await h.request('cartografia', `${base}/12/predio`, { predio_id: 31, observaciones: 'Identificado' })).status, 500)
+    assert.deepEqual(h.db, before)
+  }
+  const h = harness(); await reachVisitedWithEvidence(h); h.db.file.estado = 'cerrado'
+  assert.equal((await h.request('cartografia', `${base}/12/predio`, { predio_id: 31, observaciones: 'Identificado' })).status, 409)
+  assert.equal(h.db.links.length, 0)
+})
+
 test('Reception requires useful location data, rejects invalid types, allows one surname', async () => {
+  for (const [section, field] of [['solicitante', 'nombres'], ['ubicacion', 'municipio'], ['ubicacion', 'localidad'], ['ubicacion', 'referencias']]) {
+    const h = harness(), body = structuredClone(intake); delete body[section][field]
+    assert.equal((await h.request('ventanilla', base, body)).status, 400, field)
+    assert.equal(h.db.file, null)
+  }
   for (const body of [null, {}, { ...intake, solicitante: { nombres: ' ' } }, { ...intake, ubicacion: { ...intake.ubicacion, referencias: ' ' } }, { ...intake, ubicacion: { ...intake.ubicacion, municipio: 123 } }]) {
     const h = harness()
     assert.equal((await h.request('ventanilla', base, body)).status, 400)
@@ -226,10 +311,12 @@ test('Failed evidence audit removes private bytes, rolls back metadata and prese
 test('Vite forwards initial reception routes and blocks cross-origin or malformed writes', () => {
   const [pattern, proxy] = Object.entries(config.server.proxy).find(([key]) => key.includes('solicitudes-titulacion'))
   const prefix = '/api/sigep/solicitudes-titulacion'
-  for (const suffix of ['', '/12', '/12/visita', '/12/evidencia', `/12/archivos/${topoId}`]) assert.ok(new RegExp(pattern).test(prefix + suffix))
+  for (const suffix of ['', '/12', '/12/visita', '/12/predio', '/12/evidencia', `/12/archivos/${topoId}`]) assert.ok(new RegExp(pattern).test(prefix + suffix))
   const headers = { origin: 'http://localhost:5173', host: 'localhost:5173', 'content-type': 'application/json' }
   assert.equal(proxy.bypass({ method: 'POST', url: prefix, headers }), undefined)
   assert.equal(proxy.bypass({ method: 'POST', url: prefix + '/12/visita', headers }), undefined)
+  assert.equal(proxy.bypass({ method: 'POST', url: prefix + '/12/predio', headers }), undefined)
+  assert.equal(proxy.bypass({ method: 'POST', url: prefix + '/12/predio', headers: { ...headers, origin: 'http://foreign.test' } }), false)
   assert.equal(proxy.bypass({ method: 'POST', url: prefix + '/12/evidencia', headers: { ...headers, 'content-type': 'multipart/form-data; boundary=test' } }), undefined)
   assert.equal(proxy.bypass({ method: 'POST', url: prefix, headers: { ...headers, origin: 'http://foreign.test' } }), false)
   assert.equal(proxy.bypass({ method: 'POST', url: prefix + '/12/evidencia', headers }), false)

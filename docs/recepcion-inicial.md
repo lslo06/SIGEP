@@ -1,6 +1,8 @@
 # Recepción de titulación sin predio previo
 
-Cambio implementado en el directorio local el 25 de noviembre de 2026. Pendiente de aplicar la migración y desplegar en el servidor.
+Actualización del 27/11: el código local permite vincular el predio identificado al mismo folio después de visita y evidencia. Ver [Resultados de pruebas](resultado-pruebas-2026-11-27.md) y [Manual de usuario](manual-usuario.md). Pendiente de despliegue y aceptación real.
+
+Cambio implementado el 25 de noviembre de 2026. Actualización del 26/11: Eduardo aportó evidencia de la migración inicial aplicada con COMMIT y del contenedor respondiendo HTTP 200. Falta la aceptación manual del equipo; el health check no acredita el recorrido completo. Ver [Pruebas desde cero](pruebas-equipo-desde-cero.md) y [Comparación de requisitos](comparacion-requisitos-2026-11-26.md).
 
 ## Qué cambia
 

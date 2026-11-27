@@ -19,7 +19,7 @@ const password = 'solo-pruebas-123'
 const salt = 'test-flow-salt'
 const hash = `${salt}:${crypto.scryptSync(password, salt, 64).toString('hex')}`
 const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Mexico_City' }).format(new Date())
-const identities = ['ventanilla', 'cartografia', 'topografia', 'otro_topografo', 'digitalizacion', 'titulacion', 'caja']
+const identities = ['ventanilla', 'cartografia', 'topografia', 'otro_topografo', 'digitalizacion', 'titulacion', 'caja', 'captura', 'informatica', 'admin']
 const users = Object.fromEntries(identities.map((key, index) => [key, {
   id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
   nombre: `Prueba ${key}`, correo: `${key}@example.test`,
@@ -62,9 +62,10 @@ function harness() {
       assert.match(sql, next.pattern)
       if (typeof next.params === 'function') next.params(args)
       else if (next.params) assert.deepEqual(Array.from(args), next.params)
+      if (next.failure) throw Object.assign(new Error('Injected database failure'), { injected: true, code: 'XX000' })
       return { rows: next.rows, rowCount: next.rows.length }
     } catch (error) {
-      dbErrors.push(error)
+      if (!error.injected) dbErrors.push(error)
       throw error
     }
   }
@@ -265,9 +266,10 @@ test('Document checklist, upload, review and accepted-only visibility through re
   const result = await h.request('ventanilla', `${documentPath}?${new URLSearchParams({ requisito: document.requisito, etapa: document.etapa })}`, {
     method: 'POST', multipart: true, body: uploadBytes(document.nombre_archivo), steps: [
       documentContext(), q(/SELECT 1 FROM public\.requisitos_documentales/, [{}]), ...transaction([
-        q(/SELECT id FROM public\.expedientes.*FOR UPDATE/, [{ id: 12 }]),
+        q(/SELECT id,estado,etapa_actual,area_responsable FROM public\.expedientes.*FOR UPDATE/, [file]),
         q(/SELECT COALESCE\(MAX\(version\)/, [{ version: 1 }]),
         q(/INSERT INTO public\.archivos_expediente/, [document], args => { document.id = args[0]; document.bytes = args[5]; assert.equal(args[7], users.ventanilla.id) }),
+        movement('ventanilla'),
       ]),
     ],
   })
@@ -279,7 +281,12 @@ test('Document checklist, upload, review and accepted-only visibility through re
   assert.equal(rejectedWithoutReason.status, 400)
   const accepted = { ...document, estado_revision: 'aceptado' }
   const review = await h.request('digitalizacion', `${documentUrl}/revision`, { method: 'PATCH', body: { estado_revision: 'aceptado' }, steps: [
-    documentContext(), q(/UPDATE public\.archivos_expediente/, [accepted], args => assert.equal(args[4], users.digitalizacion.id)),
+    documentContext(), ...transaction([
+      q(/SELECT id,estado,etapa_actual,area_responsable.*FOR UPDATE/, [file]),
+      q(/SELECT estado_revision FROM public\.archivos_expediente.*FOR UPDATE/, [document]),
+      q(/UPDATE public\.archivos_expediente/, [accepted], args => assert.equal(args[4], users.digitalizacion.id)),
+      movement('digitalizacion'),
+    ]),
   ] })
   assert.equal(review.status, 200)
   const download = await h.request('titulacion', documentUrl, { steps: [documentContext(), q(/FROM public\.archivos_expediente/, [accepted])] })
@@ -289,11 +296,11 @@ test('Document checklist, upload, review and accepted-only visibility through re
 
 test('Cadastral readers receive folio, values and owners without acquiring write permission', async () => {
   const h = harness()
-  for (const actor of ['ventanilla', 'titulacion']) await h.login(actor)
+  for (const actor of ['ventanilla', 'titulacion', 'informatica']) await h.login(actor)
   const data = { expediente_id: 12, predio_id: 1, cedula_folio: 'CED-PRUEBA', cedula_fecha: today,
     valor_terreno: '10000.00', valor_construccion: '0.00', valor_catastral: '10000.00',
     propietarios: [{ nombre: 'María del Carmen López Hernández' }], estado_revision: 'aceptado' }
-  for (const actor of ['ventanilla', 'titulacion']) {
+  for (const actor of ['ventanilla', 'titulacion', 'informatica']) {
     const result = await h.request(actor, `${attachmentPath}/catastro`, { steps: [
       q(/SELECT 1 FROM public\.expediente_predios/, [{}], ['12', '1']),
       q(/FROM public\.datos_catastrales_expediente c/, [data], ['12', '1']),
@@ -303,4 +310,89 @@ test('Cadastral readers receive folio, values and owners without acquiring write
     const denied = await h.request(actor, `${attachmentPath}/catastro`, { method: 'PUT', body: data })
     assert.equal(denied.status, 403)
   }
+})
+
+test('Capture saves cadastral data as pending but only Cartography can accept it', async () => {
+  const h = harness(); await h.login('captura'); await h.login('cartografia')
+  const data = { propietarios: [{ nombre: 'Persona de prueba' }], valor_terreno: 500, valor_catastral: 500, estado_revision: 'aceptado' }
+  const saved = { ...data, estado_revision: 'pendiente' }
+  const captured = await h.request('captura', `${attachmentPath}/catastro`, { method: 'PUT', body: data, steps: [
+    q(/SELECT estado FROM public\.expedientes/, [file]),
+    q(/INSERT INTO public\.datos_catastrales_expediente.*'pendiente'/, [saved], args => assert.equal(args.at(-1), users.captura.id)),
+  ] })
+  assert.equal(captured.status, 200); assert.equal(captured.body.datos.estado_revision, 'pendiente')
+  assert.equal((await h.request('captura', `${attachmentPath}/catastro`, { method: 'PATCH', body: { estado_revision: 'aceptado' } })).status, 403)
+  const reviewed = await h.request('cartografia', `${attachmentPath}/catastro`, { method: 'PATCH', body: { estado_revision: 'aceptado' }, steps: [
+    q(/SELECT estado FROM public\.expedientes/, [file]),
+    q(/UPDATE public\.datos_catastrales_expediente/, [data], args => assert.equal(args[4], users.cartografia.id)),
+  ] })
+  assert.equal(reviewed.status, 200)
+})
+
+test('Document review rejects closed cases and rolls back when recording history fails', async () => {
+  const h = harness(); await h.login('digitalizacion')
+  const id = '11111111-1111-4111-8111-111111111111'
+  const context = () => q(/SELECT id, tipo_tramite, estado FROM public\.expedientes/, [file])
+  for (const estado of ['cerrado', 'entregado', 'no_procede']) {
+    const result = await h.request('digitalizacion', `${documentPath}/${id}/revision`, { method: 'PATCH', body: { estado_revision: 'aceptado' }, steps: [
+      context(), q(/^BEGIN$/), q(/SELECT id,estado,etapa_actual,area_responsable.*FOR UPDATE/, [{ ...file, estado }]), q(/^ROLLBACK$/),
+    ] })
+    assert.equal(result.status, 409)
+  }
+  const failure = await h.request('digitalizacion', `${documentPath}/${id}/revision`, { method: 'PATCH', body: { estado_revision: 'aceptado' }, steps: [
+    context(), q(/^BEGIN$/), q(/SELECT id,estado,etapa_actual,area_responsable.*FOR UPDATE/, [file]),
+    q(/SELECT estado_revision FROM public\.archivos_expediente.*FOR UPDATE/, [{ estado_revision: 'pendiente' }]),
+    q(/UPDATE public\.archivos_expediente/, [{ id, bytes: 10, estado_revision: 'aceptado' }]),
+    { ...movement('digitalizacion'), failure: true }, q(/^ROLLBACK$/),
+  ] })
+  assert.equal(failure.status, 500)
+})
+
+test('Documents cannot be uploaded if the case closes between initial read and row lock', async () => {
+  const h = harness(); await h.login('ventanilla')
+  const result = await h.request('ventanilla', `${documentPath}?requisito=Identificación%20oficial&etapa=Recepción`, {
+    method: 'POST', multipart: true, body: uploadBytes('identificacion.pdf'), steps: [
+      q(/SELECT id, tipo_tramite, estado FROM public\.expedientes/, [file]),
+      q(/SELECT 1 FROM public\.requisitos_documentales/, [{}]), q(/^BEGIN$/),
+      q(/SELECT id,estado,etapa_actual,area_responsable.*FOR UPDATE/, [{ ...file, estado: 'cerrado' }]), q(/^ROLLBACK$/),
+    ],
+  })
+  assert.equal(result.status, 409)
+})
+
+test('Own-area inbox uses authenticated role and location search includes initial requests without parcels', async () => {
+  const h = harness(); await h.login('ventanilla')
+  // Matching the query checks routing and the bound parameters; real SQL execution remains a deployment check.
+  const result = await h.request('ventanilla', '/api/expedientes?bandeja=mi&area=Legal&predio=puente', { steps: [
+    q(/FROM public\.ubicaciones_solicitadas.*e\.area_responsable = ANY.*e\.estado NOT IN \('cerrado','entregado','no_procede'\)/, [file], args => {
+      assert.equal(args[0], '%puente%'); assert.deepEqual(Array.from(args[1]), ['Ventanilla', 'Recepción', 'Recepcion'])
+    }),
+  ] })
+  assert.equal(result.status, 200)
+})
+
+test('Caja can consult applicant and receipt reference; registration is not reported as validated', async () => {
+  const h = harness(); await h.login('caja')
+  const result = await h.request('caja', '/api/pagos?busqueda=FL-PRUEBA', { steps: [
+    q(/'Registrado' AS estado, s\.nombre AS solicitante, pe\.evidencia/, [{ folio: 'FL-PRUEBA', solicitante: 'Persona de prueba', evidencia: 'Recibo de prueba', estado: 'Registrado' }], ['FL-PRUEBA']),
+  ] })
+  assert.equal(result.status, 200); assert.equal(result.body.pagos[0].estado, 'Registrado')
+  assert.equal(result.body.pagos[0].solicitante, 'Persona de prueba')
+})
+
+test('Only Administration configures a checklist; new list replaces active requirements and is readable afterwards', async () => {
+  const h = harness(); await h.login('admin'); await h.login('ventanilla')
+  const body = { tipo_tramite: 'titulacion', nombres: [' Solicitud de predio ', 'Identificación oficial', 'Solicitud de predio'] }
+  assert.equal((await h.request('ventanilla', '/api/requisitos-documentales', { method: 'POST', body })).status, 403)
+  const configured = await h.request('admin', '/api/requisitos-documentales', { method: 'POST', body, steps: transaction([
+    q(/UPDATE public\.requisitos_documentales SET activo=false/, [], ['titulacion']),
+    q(/INSERT INTO public\.requisitos_documentales.*ON CONFLICT.*activo=true/, [], ['titulacion', 'Solicitud de predio']),
+    q(/INSERT INTO public\.requisitos_documentales.*ON CONFLICT.*activo=true/, [], ['titulacion', 'Identificación oficial']),
+  ]) })
+  assert.equal(configured.status, 200)
+  assert.deepEqual(configured.body.requisitos, ['Solicitud de predio', 'Identificación oficial'])
+  const read = await h.request('ventanilla', '/api/requisitos-documentales', { steps: [
+    q(/SELECT tipo_tramite,nombre FROM public\.requisitos_documentales WHERE activo/, configured.body.requisitos.map(nombre => ({ tipo_tramite: 'titulacion', nombre }))),
+  ] })
+  assert.equal(read.status, 200); assert.equal(read.body.requisitos.length, 2)
 })

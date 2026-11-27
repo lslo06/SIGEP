@@ -112,10 +112,51 @@ export function createInitialReception({ pool, readJson, sendJson, optionalText,
   }
   async function detail(id, response, user) {
     const row = await readable(id, user)
+    const { rows: parcels } = await pool.query(`SELECT p.id,p.clave_catastral,p.superficie
+      FROM public.expediente_predios ep JOIN public.predios p ON p.id=ep.predio_id
+      WHERE ep.expediente_id=$1 ORDER BY p.id`, [id])
     const { rows: files } = await pool.query('SELECT id,version,nombre_archivo,mime_type,bytes,creado_en FROM public.archivos_visita_inicial WHERE expediente_id=$1 ORDER BY version DESC', [id])
     const topografos = ['admin', 'cartografia'].includes(user.rol)
       ? (await pool.query("SELECT id,nombre FROM public.usuarios_locales WHERE activo AND rol='topografia' ORDER BY nombre,id")).rows : []
-    return sendJson(response, 200, { solicitud: row, archivos: files.map(metadata), topografos })
+    return sendJson(response, 200, { solicitud: row, predios: parcels, archivos: files.map(metadata), topografos })
+  }
+  async function linkParcel(request, response, id, user) {
+    if (!['admin', 'cartografia'].includes(user.rol)) throw error(403, 'Solo Cartografía puede vincular el predio de la visita.')
+    const body = object(await readJson(request), 'la vinculación cartográfica')
+    if (!['number', 'string'].includes(typeof body.predio_id)) throw error(400, 'Selecciona un predio válido.')
+    const parcelId = optionalNumber(body, 'predio_id', { integer: true, min: 1 })
+    const reason = required(body, 'observaciones', 2000, 'el resultado de la identificación cartográfica')
+    if (parcelId == null) throw error(400, 'Selecciona un predio válido.')
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      const file = await lockedFile(client, id)
+      const { rows: [visit] } = await client.query('SELECT * FROM public.visitas_iniciales WHERE expediente_id=$1 FOR UPDATE', [id])
+      if (visit?.estado !== 'visitado' || file.etapa_actual !== 'revision_cartografica') throw error(409, 'La solicitud debe tener una visita registrada y estar en revisión cartográfica.')
+      const { rowCount: linked } = await client.query('SELECT predio_id FROM public.expediente_predios WHERE expediente_id=$1', [id])
+      if (linked) throw error(409, 'Esta solicitud ya tiene un predio vinculado. Actualiza la ficha.')
+      const { rowCount: evidence } = await client.query('SELECT id FROM public.archivos_visita_inicial WHERE expediente_id=$1 LIMIT 1', [id])
+      if (!evidence) throw error(409, 'Adjunta la evidencia de la visita antes de vincular el predio.')
+      const { rows: [parcel] } = await client.query(`SELECT id,clave_catastral,superficie,
+        (geom IS NOT NULL AND NOT ST_IsEmpty(geom) AND ST_IsValid(geom)
+          AND GeometryType(geom) IN ('POLYGON','MULTIPOLYGON')) AS geometria_valida
+        FROM public.predios WHERE id=$1 FOR UPDATE`, [parcelId])
+      if (!parcel) throw error(404, 'No se encontró el predio seleccionado.')
+      if (!parcel.geometria_valida) throw error(409, 'El predio necesita una geometría poligonal válida antes de vincularlo.')
+      await client.query('INSERT INTO public.expediente_predios (expediente_id,predio_id) VALUES ($1,$2)', [id, parcelId])
+      await client.query(`INSERT INTO public.mediciones_expediente
+        (expediente_id,predio_id,estado,responsable_id,responsable,fecha_compromiso,fecha_visita,superficie_m2,observaciones,referencia_evidencia)
+        VALUES ($1,$2,'visitado',$3,(SELECT nombre FROM public.usuarios_locales WHERE id=$3),$4,$5,$6,$7,$8)`,
+      [id, parcelId, visit.responsable_id, visit.fecha_compromiso, visit.fecha_visita, visit.superficie_m2,
+        visit.observaciones, `Evidencia conservada en la visita inicial del expediente ${file.id}`])
+      const destination = { estado: 'en_proceso', etapa_actual: 'integracion_cartografica', area_responsable: 'Cartografía y Valuación' }
+      await client.query('UPDATE public.expedientes SET estado=$2,etapa_actual=$3,area_responsable=$4 WHERE id=$1',
+        [id, destination.estado, destination.etapa_actual, destination.area_responsable])
+      await audit(client, file, user, `Predio vinculado: ${parcel.clave_catastral} (ID ${parcelId}). Superficie medida: ${visit.superficie_m2} m²; registrada: ${parcel.superficie ?? 'sin dato'} m². ${reason}`, destination)
+      await client.query('COMMIT')
+      return sendJson(response, 200, { predio: parcel, etapa_actual: destination.etapa_actual })
+    } catch (problem) { await client.query('ROLLBACK').catch(() => {}); throw problem }
+    finally { client.release() }
   }
   async function change(request, response, id, user) {
     const body = object(await readJson(request), 'la acción')
@@ -216,6 +257,7 @@ export function createInitialReception({ pool, readJson, sendJson, optionalText,
       if (!id && request.method === 'GET') return await list(response, user)
       if (id && !action && request.method === 'GET') return await detail(id, response, user)
       if (action === 'visita' && request.method === 'POST') return await change(request, response, id, user)
+      if (action === 'predio' && request.method === 'POST') return await linkParcel(request, response, id, user)
       if (action === 'evidencia' && request.method === 'POST') return await upload(request, response, id, user)
       if (action === 'archivos' && fileId && request.method === 'GET') return await download(response, id, fileId, user)
       return sendJson(response, 405, { error: 'Método no permitido.' })

@@ -1,4 +1,4 @@
-import { canModule, roles } from './permissions.js'
+import { canModule } from './permissions.js'
 
 export const routes = [
   { path: '/inicio', label: 'Inicio', key: 'inicio' },

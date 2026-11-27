@@ -1,5 +1,7 @@
 # Prueba del flujo actual y guía para el equipo
 
+> Corte histórico del 25/11. Para la ronda actual usar [Pruebas del equipo desde cero](pruebas-equipo-desde-cero.md) y [Comparación con requisitos del 26/11](comparacion-requisitos-2026-11-26.md). El 26/11 se ejecutaron 71 pruebas correctas y Eduardo aportó evidencia de migración inicial aplicada y API respondiendo; la prueba manual del equipo sigue pendiente.
+
 Fecha: 25 de noviembre de 2026, Ciudad de México. Versión revisada: directorio de trabajo local, antes de commit/push.
 
 ## Resultado y alcance

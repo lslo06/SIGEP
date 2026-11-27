@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { initialVisitTransitions } from '../../../api/permissions.mjs'
+import InitialParcelLink from './InitialParcelLink'
 import './initial-reception.css'
 
 const visitLabels = { revision_direccion: 'Pendiente de Dirección', revision_jefatura: 'Pendiente de Jefatura', solicitado: 'Pendiente de asignación', asignado: 'Visita asignada', visitado: 'Visita registrada · pendiente de revisión cartográfica' }
@@ -32,7 +33,7 @@ export function InitialReceptionQueue({ role, apiBase = '/api/sigep', onOpen, re
     {items?.length === 0 && <p>Sin solicitudes iniciales pendientes para tu área.</p>}
     {items?.map(item => <article className="intake-item" key={item.id}>
       <button className="intake-item-button" type="button" aria-expanded={onOpen ? undefined : selected === item.id} onClick={() => onOpen ? onOpen(item.id) : setSelected(selected === item.id ? null : item.id)}>
-        <strong>{item.folio} · {item.solicitante}</strong><span>{item.municipio} · {item.localidad}</span><span>{stateLabel(item.estado_visita)}</span><small>Área: {item.area_responsable}{item.fecha_compromiso ? ` · Visita: ${dateLabel(item.fecha_compromiso)}` : ''}</small>
+        <strong>{item.folio} · {item.solicitante}</strong><span>{item.municipio} · {item.localidad}</span><span>{item.etapa_actual === 'integracion_cartografica' ? 'Predio vinculado · integración cartográfica' : stateLabel(item.estado_visita)}</span><small>Área: {item.area_responsable}{item.fecha_compromiso ? ` · Visita: ${dateLabel(item.fecha_compromiso)}` : ''}</small>
       </button>
       {!onOpen && selected === item.id && <InitialVisit expedienteId={item.id} apiBase={apiBase} role={role} onChanged={() => setVersion(v => v + 1)} />}
     </article>)}
@@ -82,7 +83,7 @@ export function InitialVisit({ expedienteId, role, apiBase = '/api/sigep', onCha
     {success && <p role="status">{success}</p>}
     {!error && !data && <p role="status">Cargando ficha de recepción…</p>}
     {row && <>
-      <p className="intake-state">{stateLabel(row.estado_visita)}</p>
+      <p className="intake-state">{data.predios?.length ? 'Predio vinculado · integración cartográfica' : stateLabel(row.estado_visita)}</p>
       <dl className="intake-facts">
         <div><dt>Solicitante</dt><dd>{row.solicitante}</dd></div>
         <div><dt>Contacto</dt><dd>{[row.telefono, row.correo].filter(Boolean).join(' · ') || 'Sin contacto registrado'}</dd></div>
@@ -94,7 +95,9 @@ export function InitialVisit({ expedienteId, role, apiBase = '/api/sigep', onCha
         {row.estado_visita === 'visitado' && <><div><dt>Visita realizada</dt><dd>{dateLabel(row.fecha_visita)}</dd></div><div><dt>Superficie medida</dt><dd>{Number(row.superficie_m2).toLocaleString('es-MX')} m²</dd></div></>}
         {row.observaciones && <div className="intake-wide"><dt>Observaciones de la última acción</dt><dd>{row.observaciones}</dd></div>}
       </dl>
-      <p>La dirección es una referencia de recepción. La identificación definitiva del predio queda pendiente de Cartografía.</p>
+      {data.predios?.length ? <p>Predio vinculado: {data.predios.map(parcel => parcel.clave_catastral).join(', ')}. Continúa con plano y datos catastrales en la ficha del expediente de Seguimiento de trámites.</p>
+        : <p>La dirección es una referencia de recepción. La identificación definitiva del predio queda pendiente de Cartografía.</p>}
+      {['admin', 'cartografia'].includes(role) && row.estado_visita === 'visitado' && !isClosed && !data.predios?.length && <InitialParcelLink expedienteId={expedienteId} apiBase={apiBase} measuredArea={row.superficie_m2} onLinked={() => { setRevision(value => value + 1); onChanged?.() }} />}
       {actions.map(([action, step]) => <form className="intake-form" key={action} onSubmit={event => save(event, action)}>
         <fieldset disabled={busy}><legend>{step.label}</legend>
           {action === 'asignar' && <div className="intake-grid">

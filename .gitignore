@@ -6,3 +6,11 @@ dist/
 .sgfl-test-tools/
 api/private-files/
 /README.md
+
+# Local snapshot; keep it out of source releases.
+/sigep_proyecto.zip
+
+# Private server exports are reviewed before becoming release inputs.
+/entrega-privada/
+/sigep-extraccion-*/
+/sigep-extraccion-*.tar.gz*

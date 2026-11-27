@@ -15,6 +15,7 @@ export default function ExpedienteDocumentacion({ expediente, role, apiBase = '/
   const canManage = localPermissions(role).documentacion
   const canReview = localPermissions(role).revisionDocumentos
   const canCaptureCatastro = localPermissions(role).catastro
+  const canReviewCatastro = localPermissions(role).revisionCatastro
   const canReadCatastro = localPermissions(role).lecturaCatastro
 
   async function load() {
@@ -139,7 +140,7 @@ export default function ExpedienteDocumentacion({ expediente, role, apiBase = '/
         <span><strong>{doc.requisito} · v{doc.version}</strong><small>{doc.nombre} · {doc.etapa} · {statusNames[doc.estado_revision]}{doc.motivo_revision ? ` · ${doc.motivo_revision}` : ''}</small></span>
         <a className="secondary-button" href={`${apiBase}/expedientes/${expediente.id}/documentos/${doc.id}?inline=1`} target="_blank" rel="noreferrer">Ver</a>
         <a className="secondary-button" href={`${apiBase}/expedientes/${expediente.id}/documentos/${doc.id}`}>Descargar</a>
-        {canReview && <div className="document-review"><button type="button" disabled={Boolean(busy)} onClick={() => review(doc, 'aceptado')}>Aceptar</button><button type="button" disabled={Boolean(busy)} onClick={() => review(doc, 'rechazado')}>Rechazar</button><button type="button" disabled={Boolean(busy)} onClick={() => review(doc, 'pendiente')}>Pendiente</button></div>}
+        {canReview && !['cerrado', 'entregado', 'no_procede'].includes(expediente.estado) && <div className="document-review"><button type="button" disabled={Boolean(busy)} onClick={() => review(doc, 'aceptado')}>Aceptar</button><button type="button" disabled={Boolean(busy)} onClick={() => review(doc, 'rechazado')}>Rechazar</button><button type="button" disabled={Boolean(busy)} onClick={() => review(doc, 'pendiente')}>Pendiente</button></div>}
       </li>)}
     </ul>
     {canReadCatastro && (expediente.predios || []).map(predio => {
@@ -148,10 +149,10 @@ export default function ExpedienteDocumentacion({ expediente, role, apiBase = '/
         <h4>Cédula catastral y propietarios · {predio.clave_catastral}</h4>
         {canCaptureCatastro && !['cerrado', 'entregado', 'no_procede'].includes(expediente.estado) ? <form key={`${predio.id}:${data?.capturado_en || 'nuevo'}`} className="attachment-upload catastro-form" onSubmit={event => saveCatastro(event, predio)}>
           <label>Folio de cédula<input name="cedula_folio" maxLength="100" placeholder="Folio del documento, si ya existe" defaultValue={data?.cedula_folio || ''} /></label>
-          <label>Fecha<input name="cedula_fecha" type="date" defaultValue={data?.cedula_fecha?.slice(0,10) || ''} /></label>
-          <label>Valor del terreno<input name="valor_terreno" type="number" min="0" step="0.01" defaultValue={money(data?.valor_terreno)} /></label>
-          <label>Valor construcción<input name="valor_construccion" type="number" min="0" step="0.01" defaultValue={money(data?.valor_construccion)} /></label>
-          <label>Valor catastral<input name="valor_catastral" type="number" min="0" step="0.01" defaultValue={money(data?.valor_catastral)} /></label>
+          <label>Fecha de la cédula<input name="cedula_fecha" type="date" defaultValue={data?.cedula_fecha?.slice(0,10) || ''} /></label>
+          <label>Valor del terreno (MXN)<input name="valor_terreno" type="number" min="0" step="0.01" placeholder="Ej. 150000.00" defaultValue={money(data?.valor_terreno)} /></label>
+          <label>Valor de construcción (MXN)<input name="valor_construccion" type="number" min="0" step="0.01" placeholder="Ej. 50000.00" defaultValue={money(data?.valor_construccion)} /></label>
+          <label>Valor catastral (MXN)<input name="valor_catastral" type="number" min="0" step="0.01" placeholder="Importe indicado en la cédula" defaultValue={money(data?.valor_catastral)} /></label>
           <label className="full-field">Propietarios (uno por línea)<textarea name="propietarios" required placeholder="Nombre completo según la documentación revisada" defaultValue={(data?.propietarios || []).map(owner => owner.nombre).join('\n')} /></label>
           <button className="secondary-button" disabled={Boolean(busy)}>{busy === `catastro-${predio.id}` ? 'Guardando…' : 'Guardar cédula y propietarios'}</button>
         </form> : data ? <dl>
@@ -163,7 +164,7 @@ export default function ExpedienteDocumentacion({ expediente, role, apiBase = '/
           <dt>Propietarios registrados</dt><dd>{(data.propietarios || []).map(owner => owner.nombre).join('; ') || 'Sin capturar'}</dd>
         </dl> : <p>Aún no se han capturado la cédula y sus valores.</p>}
         <p>Estado: <strong>{statusNames[data?.estado_revision] || 'Sin captura'}</strong>{data?.motivo_revision ? ` · ${data.motivo_revision}` : ''}</p>
-        {canCaptureCatastro && data && !['cerrado', 'entregado', 'no_procede'].includes(expediente.estado) && <div className="document-review"><button type="button" onClick={() => reviewCatastro(predio,'aceptado')}>Aceptar datos</button><button type="button" onClick={() => reviewCatastro(predio,'rechazado')}>Rechazar datos</button></div>}
+        {canReviewCatastro && data && !['cerrado', 'entregado', 'no_procede'].includes(expediente.estado) && <div className="document-review"><button type="button" onClick={() => reviewCatastro(predio,'aceptado')}>Aceptar datos</button><button type="button" onClick={() => reviewCatastro(predio,'rechazado')}>Rechazar datos</button></div>}
       </section>
     })}
   </details>

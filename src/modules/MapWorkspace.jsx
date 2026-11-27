@@ -94,7 +94,11 @@ export default function MapWorkspace({ initialKey = '', parcelOnly = false, lote
         <header className="map-workspace-header">
           <div>
             <h1>{altas ? 'Altas' : lotes ? 'Lotes y predios' : 'Mapa territorial'}</h1>
-            <p>{altas ? 'Registra un predio o selecciona uno para iniciar un expediente.' : 'Consulta y registra predios en la cartografía de Durango.'}</p>
+            <p>{canCreateParcel
+              ? altas ? 'Registra un predio o selecciona uno para iniciar un expediente.' : 'Consulta y registra predios en la cartografía de Durango.'
+              : canCreateFile
+                ? 'Consulta predios existentes en la cartografía de Durango. Para una solicitud desde cero, abre Seguimiento de trámites → Nueva solicitud de título.'
+                : 'Consulta predios existentes en la cartografía de Durango.'}</p>
           </div>
           {canCreateParcel && (
             <button className="primary-button" type="button" disabled={loading} onClick={() => setCreateOpen(true)}>

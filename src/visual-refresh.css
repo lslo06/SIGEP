@@ -150,8 +150,7 @@ button:focus-visible, a:focus-visible { outline-color: #278f80; }
 
 /* COSAN · superficies translúcidas sobre la paleta institucional. */
 body,
-body .auth-screen,
-body .record-editor {
+body .auth-screen {
   background: var(--glass-background);
 }
 
@@ -178,7 +177,7 @@ body .sidebar :is(.nav-active svg, .brand-subtitle) {
 }
 
 body :is(.auth-card, .topbar, .stat-card, .work-panel, .lower-card, .action-panel,
-  .capture-card, .related-card, .users-card, .sgfl-card, .editor-index, .editor-form,
+  .capture-card, .related-card, .users-card, .sgfl-card,
   .form-dialog, .details-dialog, .map-preview, .map-workspace .predio-search,
   .map-workspace .map-shell, .sigep-predio-create .create-dialog) {
   background: var(--surface);
@@ -247,13 +246,13 @@ body .map-workspace .predio-search-result.selected {
   border-color: var(--cosan-haze);
 }
 
-body :is(.auth-brand .brand-mark, .editor-title-icon, .file-icon, .section-icon,
+body :is(.auth-brand .brand-mark, .file-icon, .section-icon,
   .detail-file-icon, .stat-icon.blue, .stat-icon.green) {
   color: var(--cosan-navy);
   background: var(--cosan-mist);
 }
 
-body :is(.search-box, .table-head, .module-inline-form, .editor-guidance) {
+body :is(.search-box, .table-head, .module-inline-form) {
   background: rgba(213, 222, 239, .52);
   border-color: rgba(138, 174, 224, .32);
 }
@@ -286,14 +285,14 @@ body .map-workspace .leaflet-map {
 @media (prefers-reduced-transparency: reduce) {
   :root { --surface: #f0f3fa; }
   body :is(.sidebar, .topbar, .auth-card, .auth-story, .stat-card, .work-panel, .lower-card,
-    .action-panel, .capture-card, .related-card, .users-card, .sgfl-card, .editor-index,
-    .editor-form, .form-dialog, .details-dialog, .map-preview, .map-workspace .predio-search,
+    .action-panel, .capture-card, .related-card, .users-card, .sgfl-card,
+    .form-dialog, .details-dialog, .map-preview, .map-workspace .predio-search,
     .map-workspace .map-shell, .sigep-predio-create .create-dialog) {
     backdrop-filter: none;
   }
 }
 
 @media print {
-  body, body .record-editor { background: white; }
-  body :is(.sgfl-card, .editor-form) { backdrop-filter: none; box-shadow: none; }
+  body { background: white; }
+  body .sgfl-card { backdrop-filter: none; box-shadow: none; }
 }

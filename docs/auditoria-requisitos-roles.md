@@ -1,5 +1,7 @@
 # Auditoría de requisitos y roles — 19 de noviembre de 2026
 
+> Auditoría histórica de una versión anterior. Para evaluar el proyecto actual usar [Comparación de requisitos del 26 de noviembre](comparacion-requisitos-2026-11-26.md), que contempla usuarios, permisos compartidos, documentos y recepción inicial implementados después de este corte.
+
 Base de código: e6d50c8. Revisión estática de la aplicación activa, rutas de API, migraciones y pruebas. No se inspeccionó la configuración actual de producción ni se ejecutaron escrituras en HomeLab.
 
 Fuentes funcionales leídas en `../archivos_sigep`: `SGFL_Documento_Requerimientos_v1.0.docx` (versión 1.0, 20/08/2026, propuesta para validación) y `PROCESOS DE FUNDOS LEGALES.pptx` (ambos procesos). Los SQL históricos no acreditan una función si no existe un flujo conectado en la aplicación actual. Los Excel de datos no sustituyen la especificación.

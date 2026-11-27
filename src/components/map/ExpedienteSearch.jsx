@@ -4,7 +4,7 @@ import { BorradoresDocumento } from "./ExpedienteBorradores"
 import ExpedienteDocumentacion from "./ExpedienteDocumentacion"
 import { useCallback, useEffect, useState } from "react"
 import { InitialReceptionQueue, InitialVisit } from '../initial-reception/InitialReception'
-import { BriefcaseBusiness, CalendarDays, ChevronDown, ChevronUp, Clock3, Search } from "lucide-react"
+import { BriefcaseBusiness, CalendarDays, Clock3, Search } from "lucide-react"
 
 const initialFilters = { folio: "", solicitante: "", predio: "", estado: "", fecha_desde: "", fecha_hasta: "" }
 

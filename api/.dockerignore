@@ -1,3 +1,7 @@
-node_modules
-.env
-private-files
+# Only send the API build inputs to Docker.
+*
+!Dockerfile
+!.dockerignore
+!package.json
+!package-lock.json
+!*.mjs

@@ -440,7 +440,7 @@ async function createExpediente(request, response, user) {
   }
 }
 
-async function searchExpedientes(url, response) {
+async function searchExpedientes(url, response, user) {
   try {
     const conditions = []
     const values = []
@@ -465,7 +465,7 @@ async function searchExpedientes(url, response) {
     if (parcelSearch) {
       if (parcelSearch.length > 120) return sendJson(response, 400, { error: "El filtro predio es demasiado largo." })
       const value = addValue(`%${parcelSearch}%`)
-      conditions.push(`EXISTS (
+      conditions.push(`(EXISTS (
         SELECT 1 FROM public.expediente_predios ep
         JOIN public.predios p ON p.id = ep.predio_id
         WHERE ep.expediente_id = e.id AND (
@@ -474,7 +474,23 @@ async function searchExpedientes(url, response) {
           p.fundo ILIKE ${value} OR p.manzana ILIKE ${value} OR
           p.lote ILIKE ${value} OR p.titulo ILIKE ${value}
         )
-      )`)
+      ) OR EXISTS (
+        SELECT 1 FROM public.ubicaciones_solicitadas u WHERE u.expediente_id=e.id
+          AND (u.municipio ILIKE ${value} OR u.localidad ILIKE ${value}
+            OR u.direccion ILIKE ${value} OR u.referencias ILIKE ${value})
+      ))`)
+    }
+
+    if (url.searchParams.get('bandeja') === 'mi') {
+      const areas = {
+        ventanilla: ['Ventanilla', 'Recepción', 'Recepcion'], direccion: ['Dirección', 'Direccion'],
+        jefatura: ['Jefatura de Fundos Legales'], legal: ['Legal', 'Área Legal'],
+        cartografia: ['Cartografía y Valuación', 'Cartografía', 'Cartografia', 'Valuación'],
+        digitalizacion: ['Digitalización', 'Digitalizacion'], captura: ['Captura'],
+        titulacion: ['Titulación', 'Titulacion'], informatica: ['Informática', 'Informatica'],
+      }
+      if (!['admin', 'viewer'].includes(user?.rol)) conditions.push(`e.area_responsable = ANY(${addValue(areas[user?.rol] || [])}::text[])`)
+      conditions.push("e.estado NOT IN ('cerrado','entregado','no_procede')")
     }
 
     const validDate = (value) => {
@@ -574,7 +590,7 @@ async function registrarDictamen(request, response, expedienteId, user) {
       [expedienteId],
     )
     if (!file) throw Object.assign(new Error("No se encontró el expediente."), { status: 404 })
-    if (!expedienteTypes.has(file.tipo_tramite) || file.tipo_tramite === "titulacion") {
+    if (!["certificacion_antecedentes_titulo", "certificacion_copia_titulo", "constancia_datos_lote", "constancia_tramite_titulo"].includes(file.tipo_tramite)) {
       throw Object.assign(new Error("El dictamen aplica a certificaciones y constancias."), { status: 409 })
     }
     const { rows: [prior] } = await client.query(
@@ -618,9 +634,10 @@ async function pagosExpediente(request, response, url, user) {
       const search = optionalText({ search: url.searchParams.get("busqueda") }, "search", 120) || ""
       const { rows } = await pool.query(
         `SELECT pe.id, e.folio, pe.concepto, pe.recibo, pe.importe, pe.fecha::text,
-           'Válido' AS estado, predios.claves AS clave_catastral
+           'Registrado' AS estado, s.nombre AS solicitante, pe.evidencia, predios.claves AS clave_catastral
          FROM public.pagos_expediente pe
          JOIN public.expedientes e ON e.id = pe.expediente_id
+         JOIN public.solicitantes s ON s.id = e.solicitante_id
          LEFT JOIN LATERAL (
            SELECT string_agg(p.clave_catastral, ', ' ORDER BY p.clave_catastral) AS claves
            FROM public.expediente_predios ep JOIN public.predios p ON p.id = ep.predio_id
@@ -975,6 +992,20 @@ function documentMetadata(row) {
     revisado_en: row.revisado_en, revisor: row.revisor || null, creado_en: row.creado_en }
 }
 
+async function lockOpenDocumentCase(client, expedienteId) {
+  const { rows: [file] } = await client.query('SELECT id,estado,etapa_actual,area_responsable FROM public.expedientes WHERE id=$1 FOR UPDATE', [expedienteId])
+  if (!file) throw Object.assign(new Error('No se encontró el expediente.'), { status: 404 })
+  if (['cerrado', 'entregado', 'no_procede'].includes(file.estado)) throw Object.assign(new Error('El expediente está cerrado.'), { status: 409 })
+  return file
+}
+
+async function documentMovement(client, file, user, description) {
+  await client.query(`INSERT INTO public.movimientos_expediente
+    (expediente_id,etapa_origen,etapa_destino,estado,area_origen,area_destino,observaciones,actor)
+    VALUES ($1,$2,$2,$3,$4,$4,$5,$6)`,
+  [file.id, file.etapa_actual, file.estado, file.area_responsable, description, user.correo])
+}
+
 async function expedienteDocuments(request, response, expedienteId, fileId, user, url) {
   const canManage = localPermissions(user.rol).documentacion
   try {
@@ -1028,7 +1059,7 @@ async function expedienteDocuments(request, response, expedienteId, fileId, user
       let storedPath
       try {
         await client.query('BEGIN')
-        await client.query('SELECT id FROM public.expedientes WHERE id=$1 FOR UPDATE', [expedienteId])
+        const locked = await lockOpenDocumentCase(client, expedienteId)
         const { rows: [last] } = await client.query(
           `SELECT COALESCE(MAX(version),0)+1 AS version FROM public.archivos_expediente
            WHERE expediente_id=$1 AND tipo='documento_general' AND requisito=$2`, [expedienteId, requisito],
@@ -1044,6 +1075,7 @@ async function expedienteDocuments(request, response, expedienteId, fileId, user
            RETURNING id,requisito,etapa,version,nombre_archivo,mime_type,bytes,estado_revision,motivo_revision,revisado_en,creado_en`,
           [id, expedienteId, version, upload.filename, upload.mimeType, upload.size, upload.sha256, user.id, requisito, etapa],
         )
+        await documentMovement(client, locked, user, `Documento ${id}: ${requisito}, versión ${version}, etapa ${etapa}; pendiente de revisión.`)
         await client.query('COMMIT'); storedPath = null
         return sendJson(response, 201, { documento: documentMetadata(row) })
       } catch (error) {
@@ -1058,13 +1090,24 @@ async function expedienteDocuments(request, response, expedienteId, fileId, user
       if (!['aceptado', 'rechazado', 'pendiente'].includes(body.estado_revision)) return sendJson(response, 400, { error: 'Selecciona aceptado, rechazado o pendiente.' })
       const reason = optionalText(body, 'motivo', 1000)
       if (body.estado_revision === 'rechazado' && !reason) return sendJson(response, 400, { error: 'Indica el motivo del rechazo.' })
-      const { rows: [row] } = await pool.query(
-        `UPDATE public.archivos_expediente SET estado_revision=$3, motivo_revision=$4,
-          revisado_por=$5, revisado_en=now() WHERE expediente_id=$1 AND id=$2 AND tipo='documento_general'
-         RETURNING id,requisito,etapa,version,nombre_archivo,mime_type,bytes,estado_revision,motivo_revision,revisado_en,creado_en`,
-        [expedienteId, fileId, body.estado_revision, reason, user.id],
-      )
-      return row ? sendJson(response, 200, { documento: documentMetadata(row) }) : sendJson(response, 404, { error: 'No se encontró el documento.' })
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        const locked = await lockOpenDocumentCase(client, expedienteId)
+        const { rows: [previous] } = await client.query(`SELECT estado_revision FROM public.archivos_expediente
+          WHERE expediente_id=$1 AND id=$2 AND tipo='documento_general' FOR UPDATE`, [expedienteId, fileId])
+        if (!previous) throw Object.assign(new Error('No se encontró el documento.'), { status: 404 })
+        const { rows: [row] } = await client.query(
+          `UPDATE public.archivos_expediente SET estado_revision=$3, motivo_revision=$4,
+            revisado_por=$5, revisado_en=now() WHERE expediente_id=$1 AND id=$2 AND tipo='documento_general'
+           RETURNING id,requisito,etapa,version,nombre_archivo,mime_type,bytes,estado_revision,motivo_revision,revisado_en,creado_en`,
+          [expedienteId, fileId, body.estado_revision, reason, user.id],
+        )
+        await documentMovement(client, locked, user, `Revisión documento ${fileId}: ${previous.estado_revision} → ${body.estado_revision}${reason ? `. Motivo: ${reason}` : ''}`)
+        await client.query('COMMIT')
+        return sendJson(response, 200, { documento: documentMetadata(row) })
+      } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error }
+      finally { client.release() }
     }
     return sendJson(response, 405, { error: 'Método no permitido.' })
   } catch (error) {
@@ -1115,7 +1158,7 @@ async function expedienteCatastro(request, response, expedienteId, predioId, use
       return sendJson(response,200,{datos:data||null})
     }
     if (request.method === 'PUT') {
-      if (!canCapture) return sendJson(response,403,{error:'Solo Cartografía puede capturar datos catastrales.'})
+      if (!canCapture) return sendJson(response,403,{error:'Tu rol no puede capturar datos catastrales.'})
       const { rows: [file] } = await pool.query('SELECT estado FROM public.expedientes WHERE id=$1',[expedienteId])
       if (!file) return sendJson(response,404,{error:'No se encontró el expediente.'})
       if (['cerrado','entregado','no_procede'].includes(file.estado)) return sendJson(response,409,{error:'El expediente está cerrado.'})
@@ -1137,7 +1180,7 @@ async function expedienteCatastro(request, response, expedienteId, predioId, use
       return row ? sendJson(response,200,{datos:row}) : sendJson(response,404,{error:'El predio no pertenece al expediente.'})
     }
     if (request.method === 'PATCH') {
-      if (!canCapture) return sendJson(response,403,{error:'Solo Cartografía puede revisar estos datos.'})
+      if (!localPermissions(user.rol).revisionCatastro) return sendJson(response,403,{error:'Solo Cartografía puede revisar estos datos.'})
       const { rows: [file] } = await pool.query('SELECT estado FROM public.expedientes WHERE id=$1',[expedienteId])
       if (!file) return sendJson(response,404,{error:'No se encontró el expediente.'})
       if (['cerrado','entregado','no_procede'].includes(file.estado)) return sendJson(response,409,{error:'El expediente está cerrado.'})
@@ -1213,10 +1256,11 @@ async function currentLocalUser(request) {
 }
 
 function routePermission(path, method, permissions) {
-  if (/^\/api\/solicitudes-titulacion(?:\/\d+(?:\/visita|\/evidencia|\/archivos\/[0-9a-f-]{36})?)?$/i.test(path)) {
+  if (/^\/api\/solicitudes-titulacion(?:\/\d+(?:\/visita|\/predio|\/evidencia|\/archivos\/[0-9a-f-]{36})?)?$/i.test(path)) {
     if (method === 'GET') return permissions.archivos
     if (method !== 'POST') return false
     if (path === '/api/solicitudes-titulacion') return permissions.altaExpediente
+    if (path.endsWith('/predio')) return permissions.geometria
     if (path.endsWith('/evidencia')) return permissions.evidenciaVisita
     return path.endsWith('/visita') && permissions.archivos // Handler verifies role and workflow stage.
   }
@@ -1228,7 +1272,7 @@ function routePermission(path, method, permissions) {
     if (method === "GET") return has("tramites")
     return method === "POST" ? permissions.documentacion : method === "PATCH" && permissions.revisionDocumentos
   }
-  if (/^\/api\/expedientes\/\d+\/predios\/\d+\/catastro$/.test(path)) return method === "GET" ? permissions.lecturaCatastro : ["PUT", "PATCH"].includes(method) && permissions.catastro
+  if (/^\/api\/expedientes\/\d+\/predios\/\d+\/catastro$/.test(path)) return method === "GET" ? permissions.lecturaCatastro : method === 'PUT' ? permissions.catastro : method === 'PATCH' && permissions.revisionCatastro
   if (/^\/api\/expedientes\/\d+\/dictamen$/.test(path)) return method === "POST" && permissions.dictamen
   const attachment = path.match(/^\/api\/expedientes\/\d+\/predios\/\d+\/(archivos(?:\/[0-9a-f-]{36})?|evidencia-visita|plano)$/i)
   if (attachment) {
@@ -1399,7 +1443,7 @@ const server = http.createServer(async (request, response) => {
     return sendJson(response, 503, { error: "El acceso local no está disponible." })
   }
 
-  const initialMatch = url.pathname.match(/^\/api\/solicitudes-titulacion(?:\/(\d+)(?:\/(visita|evidencia|archivos)(?:\/([0-9a-f-]{36}))?)?)?$/i)
+  const initialMatch = url.pathname.match(/^\/api\/solicitudes-titulacion(?:\/(\d+)(?:\/(visita|predio|evidencia|archivos)(?:\/([0-9a-f-]{36}))?)?)?$/i)
   if (initialMatch) return initialReception(request, response, user, {
     id: initialMatch[1], action: initialMatch[2], fileId: initialMatch[3],
   })
@@ -1441,7 +1485,7 @@ const server = http.createServer(async (request, response) => {
 
   if (url.pathname === "/api/expedientes") {
     if (request.method === "POST") return createExpediente(request, response, user)
-    if (request.method === "GET") return searchExpedientes(url, response)
+    if (request.method === "GET") return searchExpedientes(url, response, user)
     return sendJson(response, 405, { error: "Método no permitido." })
   }
 

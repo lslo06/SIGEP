@@ -4,7 +4,6 @@ import LocalApp from './LocalApp.jsx'
 import { productTitle } from './lib/brand.js'
 import './index.css'
 import './design.css'
-import './modules/record-editor.css'
 import './visual-refresh.css'
 
 document.title = productTitle

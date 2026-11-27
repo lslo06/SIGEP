@@ -125,6 +125,17 @@ const dictamenPath = '/api/expedientes/12/dictamen'
 const legal = { role: 'legal', tipoTramite: 'constancia_tramite_titulo' }
 const dictamen = { decision: 'procede', motivo: '  Datos cotejados  ', actor: 'suplantado' }
 
+test('Legal handles all four certificate types and rejects the generic search type', async () => {
+  for (const tipoTramite of ['certificacion_antecedentes_titulo', 'certificacion_copia_titulo', 'constancia_datos_lote', 'constancia_tramite_titulo']) {
+    for (const decision of ['procede', 'no_procede']) {
+      const result = await invoke(dictamenPath, { ...dictamen, decision }, { ...legal, tipoTramite })
+      assert.equal(result.status, 201, tipoTramite + ' ' + decision)
+      assert.equal(result.committedAtResponse, true)
+    }
+  }
+  assert.equal((await invoke(dictamenPath, dictamen, { ...legal, tipoTramite: 'busqueda_informacion' })).status, 409)
+})
+
 for (const [decision, estado] of [['procede', 'en_proceso'], ['no_procede', 'no_procede']]) {
   test(`Legal guarda ${decision} y el historial en la misma transacción`, async () => {
     const result = await invoke(dictamenPath, { ...dictamen, decision }, legal)

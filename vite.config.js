@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     host: 'localhost',
     proxy: {
-      '^/api/sigep/solicitudes-titulacion(?:/\\d+(?:/visita|/evidencia|/archivos/[0-9a-fA-F-]{36})?)?(?:\\?|$)': {
+      '^/api/sigep/solicitudes-titulacion(?:/\\d+(?:/visita|/predio|/evidencia|/archivos/[0-9a-fA-F-]{36})?)?(?:\\?|$)': {
         target: 'http://127.0.0.1:8100',
         rewrite: path => path.replace('/api/sigep/', '/api/'),
         bypass(request) {
@@ -16,7 +16,7 @@ export default defineConfig({
           const sameOrigin = request.headers.origin === `http://${request.headers.host}`
           if (request.method !== 'POST' || !sameOrigin) return false
           const type = request.headers['content-type']?.split(';')[0]
-          if (type === 'application/json' && /^\/api\/sigep\/solicitudes-titulacion(?:\/\d+\/visita)?$/.test(request.url || '')) return undefined
+          if (type === 'application/json' && /^\/api\/sigep\/solicitudes-titulacion(?:\/\d+\/(?:visita|predio))?$/.test(request.url || '')) return undefined
           if (type === 'multipart/form-data' && /^\/api\/sigep\/solicitudes-titulacion\/\d+\/evidencia$/.test(request.url || '')) return undefined
           return false
         },

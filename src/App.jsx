@@ -8,7 +8,6 @@ import ModuleWorkspace from './modules/ModuleWorkspace'
 import PaymentsWorkspace from './modules/PaymentsWorkspace'
 import { roles } from './lib/permissions'
 import { routes, findRoute } from './lib/routes.js'
-import { isPriority } from './lib/validation.js'
 import { firmName, productName } from './lib/brand.js'
 
 const MapWorkspace = lazy(() => import('./modules/MapWorkspace'))
@@ -38,17 +37,11 @@ const navItems = [
   { label: 'Configuración y seguridad', icon: Settings },
 ]
 
-function formatMoney(value) {
-  if (value === '' || value == null) return '—'
-  const amount = Number(value)
-  return Number.isFinite(amount)
-    ? new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(amount)
-    : '—'
-}
-
 function App({ user, organization, organizations, role, onSignOut, onOrganizationChange, permissions }) {
   const [files, setFiles] = useState([])
   const [loadingFiles, setLoadingFiles] = useState(true)
+  const [hasMoreFiles, setHasMoreFiles] = useState(false)
+  const requestVersion = useRef(0)
   const [routeHash, setRouteHash] = useState(() => window.location.hash)
   const hasModule = key => key === 'campo' ? permissions?.campo : permissions?.modulos.includes('*') || permissions?.modulos.includes(key)
   const canOpenRoute = item => Boolean(item && hasModule(item.key))
@@ -70,7 +63,7 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
       setRouteHash(`#${route.path}`)
     }
   }, [route?.path, routeHash])
-  const [activeTab, setActiveTab] = useState('Mi bandeja')
+  const [activeTab, setActiveTab] = useState(['admin', 'viewer'].includes(role) ? 'Consulta general' : 'Mi área')
   const [search, setSearch] = useState('')
   const [dialog, setDialog] = useState(null)
   const [newTitle, setNewTitle] = useState(false)
@@ -85,20 +78,23 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
     .map(word => word[0])
     .join('')
     .toLocaleUpperCase('es')
-  const priorityCount = files.filter(isPriority).length
-  const unassignedCount = files.filter((file) => file.areaActual === 'Recepción' && !['Vigente', 'Cancelado'].includes(file.estado)).length
+  const priorityCount = files.filter(file => !['Cerrado', 'Entregado', 'no procede'].includes(file.estado)).length
+  const unassignedCount = files.filter(file => ['Ventanilla', 'Recepción', 'Recepcion'].includes(file.areaActual) && !['Cerrado', 'Entregado', 'no procede'].includes(file.estado)).length
   const reviewInbox = () => {
-    setActiveTab('Prioritarios')
+    setActiveTab('Mi área')
     inboxRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   const refreshFiles = async () => {
+    const version = ++requestVersion.current
     if (!hasModule('tramites')) { setFiles([]); setLoadingFiles(false); return }
     setLoadingFiles(true)
     try {
-        const response = await fetch('/api/sigep/expedientes?fecha_desde=1900-01-01')
+        const response = await fetch(`/api/sigep/expedientes?fecha_desde=1900-01-01${activeTab === 'Mi área' ? '&bandeja=mi' : ''}`)
         const data = await response.json()
+        if (version !== requestVersion.current) return
         if (!response.ok) throw new Error(data.error || 'No fue posible consultar los expedientes.')
+        setHasMoreFiles(Boolean(data.hasMore))
         setFiles(data.expedientes.map(file => ({
           ...emptyFile,
           _id: file.id,
@@ -113,22 +109,22 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
           espera: '',
         })))
     } catch (error) {
+      if (version !== requestVersion.current) return
+      setFiles([]); setHasMoreFiles(false)
       console.error('No fue posible cargar los expedientes.', error)
       setNotice(`No se pudieron cargar los expedientes: ${error.message}`)
     } finally {
-      setLoadingFiles(false)
+      if (version === requestVersion.current) setLoadingFiles(false)
     }
   }
 
-  useEffect(() => { refreshFiles() }, [organization.id, role])
+  useEffect(() => { refreshFiles() }, [organization.id, role, activeTab])
 
   const filteredFiles = useMemo(() => files.filter((file) => {
     const query = search.trim().toLocaleLowerCase('es')
     const matchesSearch = !query || [file.id, file.propietario, file.lote, file.fundo]
       .some((value) => (value || '').toLocaleLowerCase('es').includes(query))
-    const matchesTab = activeTab !== 'Prioritarios' || isPriority(file)
-    const matchesUnassigned = activeTab !== 'Sin asignar' || (file.areaActual === 'Recepción' && !['Vigente', 'Cancelado'].includes(file.estado))
-    return matchesSearch && matchesTab && matchesUnassigned
+    return matchesSearch
   }), [files, search, activeTab])
 
   const openDetails = (file) => setDialog({ type: 'details', file })
@@ -161,9 +157,9 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
       <main className="main-area">
         <header className="topbar">
           <button className="mobile-menu icon-button" onClick={() => setMobileMenu(true)} aria-label="Abrir menú"><Menu size={21} /></button>
-          {activeNav === 'Inicio' ? <label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar folio, propietario o lote" aria-label="Buscar folio, propietario o lote" />{search && <button onClick={() => setSearch('')} aria-label="Limpiar búsqueda"><X size={15} /></button>}</label> : <div className="current-section">{activeNav === 'Configuración y seguridad' ? 'Administración' : activeNav || 'Apartado no disponible'}</div>}
+          {activeNav === 'Inicio' ? <label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar folio, solicitante o lote" aria-label="Buscar folio, solicitante o lote" />{search && <button onClick={() => setSearch('')} aria-label="Limpiar búsqueda"><X size={15} /></button>}</label> : <div className="current-section">{activeNav === 'Configuración y seguridad' ? 'Administración' : activeNav || 'Apartado no disponible'}</div>}
           <div className="topbar-actions">
-            {hasModule('inicio') && <button className="notification icon-button" onClick={() => { setActiveNav('Inicio'); setActiveTab('Prioritarios') }} aria-label={`Ver ${priorityCount} expedientes prioritarios`}><Bell size={20} />{priorityCount > 0 && <i />}</button>}
+            {hasModule('inicio') && <button className="notification icon-button" onClick={() => { setActiveNav('Inicio'); setActiveTab('Mi área') }} aria-label="Ver pendientes del área"><Bell size={20} />{priorityCount > 0 && <i />}</button>}
             {onSignOut && <button className="icon-button signout-button" onClick={onSignOut} aria-label="Cerrar sesión" title={`Cerrar sesión de ${user.email}`}><LogOut size={18} /></button>}
             <div className="top-user"><div className="user-avatar small-avatar">{(user.email || 'US').slice(0, 2).toUpperCase()}</div><div><strong>{user.email}</strong><small>{roles[role] || 'Gestión territorial'}</small></div><ChevronDown size={15} /></div>
           </div>
@@ -186,31 +182,31 @@ function App({ user, organization, organizations, role, onSignOut, onOrganizatio
                     : <p>Este apartado no está disponible.</p>}
         </div> : <div className="content">
           <section className="welcome-row">
-            <div><div className="eyebrow date-label">{new Intl.DateTimeFormat('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()).toLocaleUpperCase('es-MX')}</div><h1>Buenos días, {user.user_metadata?.nombre || user.email?.split('@')[0]}</h1><p>Tienes <strong className="orange-text">{files.filter((file) => ['Hoy', '1 día'].includes(file.espera)).length} tareas pendientes</strong> en {organization.nombre}.</p></div>
+            <div><div className="eyebrow date-label">{new Intl.DateTimeFormat('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()).toLocaleUpperCase('es-MX')}</div><h1>Buenos días, {user.user_metadata?.nombre || user.email?.split('@')[0]}</h1><p>{activeTab === 'Mi área' ? 'Consulta los pendientes de tu área.' : 'Consulta general de expedientes autorizados.'}</p></div>
             {permissions.altaExpediente && <button className="primary-button" onClick={() => setNewTitle(true)}><Plus size={17} /> Nueva solicitud de título</button>}
           </section>
 
           <section className="priority-banner">
-            <div className="priority-copy"><div className="eyebrow aqua">SEGUIMIENTO DE EXPEDIENTES</div><h2>{loadingFiles ? 'Preparando tu resumen de trabajo' : priorityCount ? `${priorityCount} expedientes requieren atención` : 'Sin expedientes prioritarios'}</h2><p>Revisa los pendientes y los trámites en recepción.</p></div>
-            <div className="priority-counts"><div className="priority-count"><span className="dot red-dot" /><div><strong>{priorityCount}</strong><small>Prioritarios</small></div></div><div className="priority-count"><span className="dot gold-dot" /><div><strong>{unassignedCount}</strong><small>En recepción</small></div></div><button onClick={reviewInbox}>Revisar bandeja <ChevronRight size={16} /></button></div>
+            <div className="priority-copy"><div className="eyebrow aqua">SEGUIMIENTO DE EXPEDIENTES</div><h2>{loadingFiles ? "Preparando tu resumen de trabajo" : activeTab}</h2><p>Los conteos corresponden a los registros cargados en esta vista.</p></div>
+            <div className="priority-counts"><div className="priority-count"><span className="dot red-dot" /><div><strong>{priorityCount}</strong><small>Abiertos</small></div></div><div className="priority-count"><span className="dot gold-dot" /><div><strong>{unassignedCount}</strong><small>En recepción</small></div></div><button onClick={reviewInbox}>Revisar bandeja <ChevronRight size={16} /></button></div>
           </section>
 
           <section className="stats-grid">
-            <StatCard icon={Folder} tone="blue" label="EN MI BANDEJA" value={String(files.length)} caption={`${files.filter((file) => ['Hoy', '1 día'].includes(file.espera)).length} requieren acción`} />
+            <StatCard icon={Folder} tone="blue" label={activeTab.toLocaleUpperCase("es")} value={String(files.length)} caption="Expedientes cargados" />
             <StatCard icon={Map} tone="orange" label="EN TRABAJO DE CAMPO" value={String(files.filter((file) => file.areaActual === 'Topografía').length)} caption="Expedientes asignados" />
             <StatCard icon={FileText} tone="green" label="LISTOS PARA ENTREGA" value={String(files.filter((file) => file.estado === 'Listo para entrega').length)} caption="Pendientes de entrega" />
           </section>
 
           <section className="work-panel" ref={inboxRef}>
             <div className="panel-heading">
-              <div><h2>Bandeja de trabajo</h2><p>Acciones que corresponden a tu área.</p></div>
-              <div className="tabs" role="tablist" aria-label="Filtrar expedientes">{['Mi bandeja', 'Prioritarios', 'Sin asignar'].map((tab) => <button key={tab} className={activeTab === tab ? 'tab-active' : ''} onClick={() => setActiveTab(tab)}>{tab}</button>)}</div>
+              <div><h2>Bandeja de trabajo</h2><p>{activeTab === "Mi área" ? ["admin", "viewer"].includes(role) ? "Supervisión de expedientes abiertos de todas las áreas." : "Expedientes abiertos del área correspondiente a tu rol." : "Consulta general; no implica asignación a tu puesto."}</p></div>
+              <div className="tabs" role="tablist" aria-label="Filtrar expedientes">{['Mi área', 'Consulta general'].map((tab) => <button key={tab} className={activeTab === tab ? 'tab-active' : ''} onClick={() => setActiveTab(tab)}>{tab}</button>)}</div>
             </div>
             <div className="table-scroll">
-              <div className="table-head"><span>EXPEDIENTE</span><span>SOLICITANTE</span><span>ÁREA ACTUAL</span><span>SIGUIENTE ACCIÓN</span><span>EN ESPERA</span><span /></div>
+              <div className="table-head"><span>EXPEDIENTE</span><span>SOLICITANTE</span><span>ÁREA ACTUAL</span><span>ETAPA ACTUAL</span><span>RECEPCIÓN</span><span /></div>
               {loadingFiles ? <div className="empty-state"><LoaderCircle className="spin" size={22} /><strong>Cargando expedientes…</strong></div> : filteredFiles.length ? filteredFiles.map((file) => <FileRow key={file._id} file={file} onClick={() => openDetails(file)} />) : <div className="empty-state"><SlidersHorizontal size={22} /><strong>No hay expedientes para mostrar</strong><span>Prueba con otro filtro o registra un nuevo trámite.</span></div>}
             </div>
-            <div className="panel-footer"><span>Mostrando {filteredFiles.length} de {files.length} expedientes</span><button onClick={() => { setActiveNav('Inicio'); setActiveTab('Mi bandeja') }}>Ver todos los expedientes <ChevronRight size={15} /></button></div>
+            <div className="panel-footer"><span>Mostrando {filteredFiles.length} de {files.length} registros cargados{hasMoreFiles ? " · Hay más resultados; busca por folio en Seguimiento." : ""}</span><button onClick={() => { setActiveNav('Inicio'); setActiveTab('Consulta general') }}>Consulta general <ChevronRight size={15} /></button></div>
           </section>
 
           <section className="lower-grid">
@@ -241,7 +237,7 @@ function FileRow({ file, onClick }) {
     <span className="table-cell"><small className="cell-label">SOLICITANTE</small><strong>{file.propietario}</strong></span>
     <span className="table-cell"><small className="cell-label">ÁREA ACTUAL</small><span className={`area-pill ${areaClass}`}><i />{file.areaActual}</span></span>
     <span className="table-cell"><small className="cell-label">SIGUIENTE ACCIÓN</small><strong>{file.siguienteAccion || 'Pendiente de asignación'}</strong></span>
-    <span className="table-cell"><small className="cell-label">EN ESPERA</small><strong>{file.espera || '—'}</strong></span>
+    <span className="table-cell"><small className="cell-label">RECEPCIÓN</small><strong>{file.fechaSolicitud || '—'}</strong></span>
     <ChevronRight className="row-chevron" size={18} />
   </button>
 }
@@ -251,7 +247,7 @@ function DetailsDialog({ file, onClose }) {
   return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="details-dialog" role="dialog" aria-modal="true" aria-labelledby="details-title">
     <header className="dialog-header detail-header"><div><div className="detail-title-line"><span className="detail-file-icon"><FileText size={21} /></span><div><span className="eyebrow">EXPEDIENTE</span><h2 id="details-title">{file.id}</h2></div></div><p>{file.tipo} <span className="detail-divider">·</span> {file.estado}</p></div><button className="icon-button" onClick={onClose} aria-label="Cerrar"><X size={20} /></button></header>
     <div className="details-body">
-      <div className="detail-highlight"><span><Users size={17} /> Propietario</span><strong>{file.propietario}</strong><small>{file.fundo} · MZ {file.manzana || '—'} · Lote {file.lote || '—'} · {file.superficie || '—'} m²</small></div>
+      <div className="detail-highlight"><span><Users size={17} /> Solicitante</span><strong>{file.propietario}</strong><small>{file.fundo} · MZ {file.manzana || '—'} · Lote {file.lote || '—'} · {file.superficie || '—'} m²</small></div>
       {group('Seguimiento', [['Fecha de solicitud', file.fechaSolicitud], ['Estado', file.estado], ['Área actual', file.areaActual], ['Etapa actual', file.siguienteAccion]])}
       <p>Consulta documentos, mediciones e historial en Seguimiento de trámites. Este resumen muestra únicamente los datos recibidos del expediente.</p>
     </div>

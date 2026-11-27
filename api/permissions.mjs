@@ -43,7 +43,8 @@ export function localPermissions(role) {
     plano: ['admin', 'cartografia'].includes(role),
     documentacion: ['admin', 'cartografia', 'digitalizacion', 'captura', 'ventanilla'].includes(role),
     revisionDocumentos: ['admin', 'cartografia', 'digitalizacion'].includes(role),
-    catastro: ['admin', 'cartografia'].includes(role),
-    lecturaCatastro: ['admin', 'cartografia', 'digitalizacion', 'captura', 'ventanilla', 'titulacion'].includes(role),
+    catastro: ['admin', 'cartografia', 'captura'].includes(role),
+    revisionCatastro: ['admin', 'cartografia'].includes(role),
+    lecturaCatastro: ['admin', 'cartografia', 'digitalizacion', 'captura', 'ventanilla', 'titulacion', 'informatica'].includes(role),
   }
 }

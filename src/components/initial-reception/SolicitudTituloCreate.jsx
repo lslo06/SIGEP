@@ -37,7 +37,7 @@ export default function SolicitudTituloCreate({ onClose, onCreated, apiBase = '/
         <label>Teléfono de contacto<input name="telefono" type="tel" maxLength={50} placeholder="Ej. 618 123 4567" autoComplete="tel" /></label>
         <label>Correo electrónico<input name="correo" type="email" maxLength={254} placeholder="Ej. persona@ejemplo.com" autoComplete="email" /></label>
         <label>Domicilio para notificaciones<input name="domicilio_notificacion" maxLength={500} placeholder="Lugar donde se puede contactar al solicitante" /></label>
-      </div><small>Si la persona tiene un solo apellido, deja el otro vacío. El domicilio de notificaciones puede ser distinto al terreno solicitado.</small></fieldset>
+      </div><small>Captura al menos un apellido. Si la persona tiene un solo apellido, deja el otro vacío. Teléfono, correo y domicilio para notificaciones son opcionales en esta recepción; este domicilio puede ser distinto al terreno solicitado.</small></fieldset>
       <fieldset disabled={busy}><legend>Ubicación declarada del terreno</legend><div className="intake-grid">
         <label>Municipio *<input name="municipio" required maxLength={150} placeholder="Ej. Durango" /></label>
         <label>Localidad o colonia *<input name="localidad" required maxLength={150} placeholder="Nombre de la localidad o colonia" /></label>

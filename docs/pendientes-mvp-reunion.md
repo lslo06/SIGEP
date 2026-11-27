@@ -1,5 +1,7 @@
 # SIGEP: pendientes, roles y orden del trámite
 
+> Corte histórico del 25/11. El estado actualizado, incluida la canalización ya implementada de Dirección/Jefatura y la evidencia de despliegue del 26/11, está en [Comparación con requisitos](comparacion-requisitos-2026-11-26.md). Para probar usar [Pruebas del equipo desde cero](pruebas-equipo-desde-cero.md).
+
 Revisión del código local: 25 de noviembre de 2026. Base: reunión del 19 de noviembre, documento de requisitos v1.0, presentación PROCESOS DE FUNDOS LEGALES y comportamiento implementado. Este documento distingue funciones existentes de propuestas; no acredita que el servidor tenga desplegada esta versión ni aprueba procedimientos administrativos.
 
 **Prioridad confirmada por Eduardo el 25/11:** el caso principal comienza cuando el ciudadano solicita su título en Ventanilla. Ya está implementado localmente el incremento de recepción sin predio previo, canalización, asignación y registro de visita; requiere migración, despliegue y prueba manual. Ver [Recepción inicial](recepcion-inicial.md). La conciliación de las 17 etapas del Word con las 27 de la presentación está en [Primera titulación desde Ventanilla](flujo-titulacion-desde-ventanilla.md).
